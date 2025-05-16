@@ -21,6 +21,8 @@ subroutine freezaerl_koop2000(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -188,7 +190,8 @@ subroutine freezaerl_koop2000(carma, cstate, iz, rc)
                       volrat = rhosol(isol) / RHO_W * ((100._f - WT) / WT) + 1._f
                     endif
 
-                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) + rjj * volrat * vol(ibin,igroup)                ! [s-1]
+                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) &
+			+ rjj * volrat * vol(ibin,igroup)                ! [s-1]
                   endif   ! ssi > sifreeze .and. target droplets not evaporating
                 enddo    ! ibin = 1,NBIN
               endif     ! inucproc(iepart,ienucto) .eq. I_DROPACT

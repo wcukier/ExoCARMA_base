@@ -25,6 +25,8 @@ subroutine hetnucl(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -105,7 +107,7 @@ subroutine hetnucl(carma, cstate, iz, rc)
   
         ! Only compute nucleation rate for heterogenous nucleation
         if (inucproc(iepart,ienucto) .eq. I_HETNUC) then
-  
+
           ! Loop over particle bins.  Loop from largest to smallest for 
           ! evaluation of index of smallest bin nucleated during time step <inucstep>.
           do ibin = NBIN, 1, -1
@@ -131,7 +133,10 @@ subroutine hetnucl(carma, cstate, iz, rc)
               !
               ! NOTE: We are only trying to model PMC partcles, so turn of nucleation
               ! where the CAM microphysics takes over (~1 mb = 1000 dyne).
-              if ((p(iz) .lt. 1.e3_f) .and. (supsati(iz,igas) .gt. 0._f)) then
+
+		!write(*,*) p(iz),supsati(iz,igas)
+
+              if ((supsati(iz,igas) .gt. 0._f)) then
                 rlogs = log(supsati(iz,igas) + 1._f)
       
                 ! Critical ice germ radius formed in the sulfate solution
@@ -157,15 +162,28 @@ subroutine hetnucl(carma, cstate, iz, rc)
                 ! Gibbs free energy of ice germ formation in the ice/sulfate solution
                 !
                 !  Eq. 3, Rapp & Thomas [2006]
-                delfg = 4._f * PI * ag**2 * surfctia(iz) - 4._f * PI * RHO_I * ag**3 *BK * t(iz) * rlogs / 3._f / rmw
+                delfg = 4._f * PI * ag**2 * surfctia(iz) - 4._f * PI * &
+		RHO_I * ag**3 *BK * t(iz) * rlogs / 3._f / rmw
       
                 ! Ice nucleation rate in a 0.2 micron aerosol (/sec)
-                expon = (2._f * gdes - gsd - fh*delfg) / BK / t(iz)
+                !expon = (2._f * gdes - gsd - fh*delfg) / BK / t(iz)
+                expon = (gdes - fh*delfg) / BK / t(iz)
 
                 ! NOTE: Excessive nucleation makes it difficult for the substepping to find a
                 ! stable solution, so put a cap on really large nucleation values that can be produced.
-                rnuclg(ibin,igroup,ignucto) = min(1e10_f, zeld * BK * t(iz) * diflen * ag * sin(contang) * &
-                  4._f * PI * r(ibin,igroup)**2 * rnh2o**2 / (fh * rmw * vibfreq) * exp(expon))
+                rnuclg(ibin,igroup,ignucto) = zeld * BK * t(iz) * diflen * ag * sin(contang) * &
+                  4._f * PI * r(ibin,igroup)**2 * rnh2o**2 / (fh * rmw * vibfreq) * exp(expon)
+                  
+                !DPOW Check --> change units of rnuclg to CARMA units if not in I_CART, possibly need to divide instead of multiply
+                
+                rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) * zmet(iz) * xmet(iz) * ymet(iz)
+                
+		!if (t(iz) .gt. 200._f) then
+		 ! write(*,*) "het_orig", iz, ibin, rnuclg(ibin,igroup,ignucto), ag*diflen*sin(contang), rnh2o*BK*t(iz), zeld, rmw, exp(expon), fh
+                !  write(*,*) "het_orig", iz, ibin, rnuclg(ibin,igroup,ignucto), zeld,  diflen * ag * sin(contang), &
+                 ! 4._f * PI**2._f * r(ibin,igroup)**2,  sqrt((rnh2o*BK * t(iz))**2 / (2._f * rmw * PI*BK * t(iz))), &
+		 ! sqrt((rnh2o*BK * t(iz))**2 / (2._f * rmw * PI*BK * t(iz)))/vibfreq*exp(expon), 2._f / fh
+	!	endif
               endif
             endif   ! pconmax(ixyz,igroup) .gt. FEW_PC 
           enddo      ! ibin = 1,NBIN

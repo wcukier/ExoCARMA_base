@@ -7,6 +7,8 @@ module sulfate_utils
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -90,10 +92,11 @@ contains
 
     !  Prevent a NaN calculation  
     !  In the upper thermosphere p_h2o can be very low and vp_h2o can be very high
-    if (p_h2o.lt.1.e-10_f .and. vp_h2o.gt.0._f) p_h2o=1.e-10_f   
+    if (p_h2o .lt. 1.0e-10_f .and. vp_h2o .gt. 0._f) p_h2o=1.e-10_f   
    
     !  Activity = water pp in mb / water eq. vp over pure water in mb
     activ = p_h2o/vp_h2o
+!	write(*,*) activ,p_h2o,vp_h2o
  
     if (activ.lt.0.05_f) then
       activ = max(activ,1.e-6_f)    ! restrict minimum activity

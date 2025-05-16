@@ -20,6 +20,8 @@ subroutine csolve(carma, cstate, ibin, ielem, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -34,6 +36,7 @@ subroutine csolve(carma, cstate, ibin, ielem, rc)
 
   ! Local Variables
   integer                        :: igroup
+  integer                        :: iz			!PETER
   real(kind=f)                   :: xyzmet(NZ)
   real(kind=f)                   :: ppd(NZ)
   real(kind=f)                   :: pls(NZ)
@@ -56,6 +59,13 @@ subroutine csolve(carma, cstate, ibin, ielem, rc)
   pc(:,ibin,ielem) = ( pc(:,ibin,ielem) &
                        + dtime * ppd(:) ) &
                        /  ( ONE + pls(:) * dtime )
+
+  coagprod(:,ibin,ielem) = ppd
+  coagloss(:,ibin,ielem) = pls*pc(:,ibin,ielem)
+
+!  do iz = 1, NZ										   						!PETER
+!    write(lundiag,'(2I5,I7,3E11.3)') iz, ibin, ielem, ppd(iz), pc(iz,ibin,ielem)*pls(iz), ppd(iz)-pc(iz,ibin,ielem)*pls(iz)	!PETER
+!  end do																!PETER
 
   return
 end

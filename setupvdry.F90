@@ -15,6 +15,8 @@ subroutine setupvdry(carma, cstate, lndfv, ocnfv, icefv, lndram, ocnram, iceram,
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -46,7 +48,7 @@ subroutine setupvdry(carma, cstate, lndfv, ocnfv, icefv, lndram, ocnram, iceram,
 
   if (do_drydep) then
   
-    if (igridv .eq. I_CART) then
+    if ((igridv .eq. I_CART) .or. (igridv .eq. I_LOGP)) then
       ibot = 1
       ibotp1 = 1
       vfall(:,:) = vf(ibotp1, :, :)  ![cm/s] 
@@ -67,19 +69,22 @@ subroutine setupvdry(carma, cstate, lndfv, ocnfv, icefv, lndram, ocnram, iceram,
           
           ! land           
           if (lndfrac > 0._f) then
-            call calcrs(carma, cstate, lndfv, t(ibot), r_wet(ibot, ibin, igroup), bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 1, rc)                            
+            call calcrs(carma, cstate, lndfv, t(ibot), r_wet(ibot, ibin, igroup), &
+		bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 1, rc)                            
             vd_lnd = vfall(ibin, igroup) + 1._f / (lndram + rs)             
           end if
           
           ! ocean              
           if (ocnfrac > 0._f) then       
-            call calcrs(carma, cstate, ocnfv, t(ibot), r_wet(ibot, ibin, igroup), bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 2, rc)                        
+            call calcrs(carma, cstate, ocnfv, t(ibot), r_wet(ibot, ibin, igroup), &
+		bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 2, rc)                        
             vd_ocn = vfall(ibin, igroup) + 1._f / (ocnram + rs)                         
           end if
           
           ! sea ice        
           if (icefrac > 0._f) then  
-            call calcrs(carma, cstate, icefv, t(ibot), r_wet(ibot, ibin, igroup), bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 3, rc)               
+            call calcrs(carma, cstate, icefv, t(ibot), r_wet(ibot, ibin, igroup), &
+		bpm(ibot, ibin, igroup), vfall(ibin,igroup), rs, 3, rc)               
             vd_ice = vfall(ibin, igroup) + 1._f / (iceram + rs)
           end if
           
@@ -94,8 +99,10 @@ subroutine setupvdry(carma, cstate, lndfv, ocnfv, icefv, lndram, ocnram, iceram,
     ! Scale cartesian fallspeeds to the appropriate vertical coordinate system.
     ! Non--cartesion coordinates are assumed to be positive downward, but
     ! vertical velocities in this model are always assumed to be positive upward. 
-    if( igridv /= I_CART )then
+    if(( igridv /= I_CART ) .and. (igridv /= I_LOGP)) then
       vd(:,:) = -vd(:,:) / zmetl(NZP1)
+    elseif (igridv .eq. I_LOGP) then
+    	vd(:,:) = vd(:,:) / zmetl(1)
     end if
   end if
   

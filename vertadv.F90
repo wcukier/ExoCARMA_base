@@ -14,6 +14,8 @@ subroutine vertadv(carma, cstate, vtrans, cvert, itbnd, ibbnd, cvert_tbnd, cvert
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -63,9 +65,14 @@ subroutine vertadv(carma, cstate, vtrans, cvert, itbnd, ibbnd, cvert_tbnd, cvert
     end where
   else
   
-  
-    if( ibbnd .eq. I_FLUX_SPEC ) vtrans(1) = 0._f
-    if( itbnd .eq. I_FLUX_SPEC ) vtrans(NZP1) = 0._f
+!    if( ibbnd .eq. I_FLUX_SPEC ) vtrans(1) = 0._f
+!    if( itbnd .eq. I_FLUX_SPEC ) vtrans(NZP1) = 0._f
+    if( ibbnd .eq. I_FLUX_SPEC ) vtrans(1) = winds(1)								!PETER
+    if( itbnd .eq. I_FLUX_SPEC ) vtrans(NZP1) = winds(NZ)							!PETER
+!    if( ibbnd .eq. I_FLUX_SPEC ) vtrans(1) = 8.0e-6_f / (rhoa(1) / (xmet(1)*ymet(1)*zmet(1)))                  !PETER
+!    if( itbnd .eq. I_FLUX_SPEC ) vtrans(NZP1) = 8.0e-6_f / (rhoa(NZ) / (xmet(NZ)*ymet(NZ)*zmet(NZ)))           !PETER
+!    if( ibbnd .eq. I_FLUX_SPEC ) vtrans(1) = -8.0e-6_f / (rhoa(1) / (xmet(1)*ymet(1)*zmet(1)))                  !PETER
+!    if( itbnd .eq. I_FLUX_SPEC ) vtrans(NZP1) = -8.0e-6_f / (rhoa(NZ) / (xmet(NZ)*ymet(NZ)*zmet(NZ)))           !PETER
             
     ! Set some constants
     nzm1 = max( 1, NZ-1 )
@@ -249,8 +256,73 @@ subroutine vertadv(carma, cstate, vtrans, cvert, itbnd, ibbnd, cvert_tbnd, cvert
         endif
       endif
     endif
+
+   ! Lower boundary transport rates:  If I_ZERO_CGRAD boundary
+    ! condition is selected, then equate concentration of lowest layer to 
+    ! that of a layer just beyond the lowest layer edge to calculate 
+    ! the transport rate across the bottom boundary of the model.
+    if( ibbnd .eq. I_ZERO_CGRAD ) then
+  
+      com2  = ( dz(1) + dz(itwo) ) / 2._f
+      x = vtrans(1)*dtime/dz(1)
+      xpos = abs(x)
+      cvert0 = cvert(1)
+      if( vtrans(1) .gt. 0._f )then
+  
+        if( x .lt. 1._f .and. cvert0 .ne. 0._f )then
+          vertadvu(1) = vtrans(1)/cvert0*com2 &
+                     * ( ar(1) - 0.5_f*dela(1)*x + &
+                     (x/2._f - (x**2)/3._f)*a6(1) )
+        else
+          vertadvu(1) = vtrans(1)
+        endif
+  
+      elseif( vtrans(1) .lt. 0._f )then
+  
+        if( x .gt. -1._f .and. cvert(1) .ne. 0._f )then
+          vertadvd(1) = -vtrans(1)/ &
+                     cvert(1)*com2 &
+                     * ( al(1) + 0.5_f*dela(1)*xpos + &
+                     (xpos/2._f - (xpos**2)/3._f)*a6(1) )
+        else
+          vertadvd(1) = -vtrans(1)
+        endif
+      endif
+    endif
+  
+    ! Upper boundary transport rates
+    if( itbnd .eq. I_ZERO_CGRAD ) then
+  
+      com2  = ( dz(NZ) + dz(nzm1) ) / 2._f
+      x = vtrans(NZ+1)*dtime/dz(NZ)
+      xpos = abs(x)
+      cvertnzp1 = cvert(NZ)
+  
+      if( vtrans(NZ+1) .gt. 0._f )then
+  
+        if( x .lt. 1._f .and. cvert(NZ) .ne. 0._f )then
+          vertadvu(NZ+1) = vtrans(NZ+1)/cvert(NZ)*com2 &
+                   * ( ar(NZ) - 0.5_f*dela(NZ)*x + &
+                   (x/2._f - (x**2)/3._f)*a6(NZ) )
+        else
+          vertadvu(NZ+1) = vtrans(NZ+1)
+        endif
+  
+      elseif( vtrans(NZ+1) .lt. 0._f )then
+  
+        if( x .gt. -1._f .and. cvertnzp1 .ne. 0._f )then
+          vertadvd(NZ+1) = -vtrans(NZ+1)/ &
+                   cvertnzp1*com2 &
+                   * ( al(NZ) + 0.5_f*dela(NZ)*xpos + &
+                   (xpos/2._f - (xpos**2)/3._f)*a6(NZ) )
+        else
+          vertadvd(NZ+1) = -vtrans(NZ+1)
+        endif
+      endif
+    endif
   endif
-      
+     
+
   ! Return to caller with vertical transport rates.
   return
 end

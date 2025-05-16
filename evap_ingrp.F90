@@ -15,6 +15,8 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -33,6 +35,7 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
   integer                              :: ie  
   integer                              :: isub
 
+ ! write(*,*) 'ingrp', iz, ibin, ig, ip
 
   ! For a single group, the core mass fraction is 0.
   cmf(ibin,ig) = 0.0_f
@@ -47,6 +50,7 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
     ie = ip + isub - 1
     evappe(ibin-1,ie) = evappe(ibin-1,ie) + &
       pc(iz,ibin,ie)*evaplg(ibin,ig)
+    !write(*,*) 'ingrp', iz, ig, isub, ie, ibin, evappe(ibin-1,ie), pc(iz,ibin,ie), evaplg(ibin,ig)
   enddo
 
   return

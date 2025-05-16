@@ -19,6 +19,8 @@ subroutine mie(carma, miertn, radius, wavelength, m, lqext, lqsca, lasym, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carma_mod
 

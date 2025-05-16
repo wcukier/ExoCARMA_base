@@ -29,6 +29,8 @@ subroutine tsolve(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -41,13 +43,13 @@ subroutine tsolve(carma, cstate, iz, rc)
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
   
   1 format(/,'tsolve::ERROR - negative temperature for : iz=',i4,',lat=',&
-              f7.2,',lon=',f7.2,',T=',e9.3,',dT=',e9.3,',t_old=',e9.3,',d_gc=',e9.3,',dT_adv=',e9.3)
+              f7.2,',lon=',f7.2,',T=',e10.3,',dT=',e10.3,',t_old=',e10.3,',d_gc=',e10.3,',dT_adv=',e10.3)
   2 format(/,'tsolve::ERROR - temperature change to large for : iz=',i4,',lat=',&
-              f7.2,',lon=',f7.2,',T=',e9.3,',dT_rlh=',e9.3,',dT_pth=',e9.3,',t_old=',e9.3,',d_gc=',e9.3,',dT_adv=',e9.3)
+              f7.2,',lon=',f7.2,',T=',e10.3,',dT_rlh=',e10.3,',dT_pth=',e10.3,',t_old=',e10.3,',d_gc=',e10.3,',dT_adv=',e10.3)
   3 format(/,'tsolve::ERROR - temperature change to large for : iz=',i4,',lat=',&
-              f7.2,',lon=',f7.2,',T=',e9.3,',dT_rlh=',e9.3,',dT_pth=',e9.3,',t_old=',e9.3)
+              f7.2,',lon=',f7.2,',T=',e10.3,',dT_rlh=',e10.3,',dT_pth=',e10.3,',t_old=',e10.3)
   4 format(/,'tsolve::ERROR - negative temperature for : iz=',i4,',lat=',&
-              f7.2,',lon=',f7.2,',T=',e9.3,',dT=',e9.3,',t_old=',e9.3)
+              f7.2,',lon=',f7.2,',T=',e10.3,',dT=',e10.3,',t_old=',e10.3)
       
   real(kind=f)      :: dt           ! delta temperature
   real(kind=f)      :: t_threshold  ! temperature change threshold
@@ -81,10 +83,12 @@ subroutine tsolve(carma, cstate, iz, rc)
   if (t(iz) < 0._f) then
     if (do_substep) then
       if (nretries == maxretries) then 
-      if (do_print) write(LUNOPRT,1) iz, lat, lon, t(iz), dt, told(iz), d_gc(iz, 1), d_t(iz)
+      if (do_print) write(LUNOPRT,1) iz, &
+	lat, lon, t(iz), dt, told(iz), d_gc(iz, 1), d_t(iz)
       end if
     else
-      if (do_print) write(LUNOPRT,4) iz, lat, lon, t(iz), dt, told(iz)
+      if (do_print) write(LUNOPRT,4) iz, &
+	lat, lon, t(iz), dt, told(iz)
     end if
     
     rc = RC_WARNING_RETRY
@@ -103,10 +107,12 @@ subroutine tsolve(carma, cstate, iz, rc)
     if (abs(abs(dt)) > t_threshold) then
       if (do_substep) then
         if (nretries == maxretries) then 
-          if (do_print) write(LUNOPRT,2) iz, lat, lon, t(iz), rlprod*dtime, dtime*partheat(iz), told(iz), d_gc(iz, 1), d_t(iz)
+          if (do_print) write(LUNOPRT,2) iz, lat, lon, t(iz), &
+		rlprod*dtime, dtime*partheat(iz), told(iz), d_gc(iz, 1), d_t(iz)
         end if
       else
-        if (do_print) write(LUNOPRT,3) iz, lat, lon, t(iz), rlprod*dtime, dtime*partheat(iz), told(iz)
+        if (do_print) write(LUNOPRT,3) iz, lat, lon, t(iz),&
+		rlprod*dtime, dtime*partheat(iz), told(iz)
       end if
   
       rc = RC_WARNING_RETRY

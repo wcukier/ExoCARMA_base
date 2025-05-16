@@ -17,6 +17,8 @@ subroutine growevapl(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -84,7 +86,11 @@ subroutine growevapl(carma, cstate, iz, rc)
 
     if (igas .ne. 0) then
       ! Only valid for condensing liquid water and sulfric acid currently.
-      if ((igas /= igash2o) .and. (igas .ne. igash2so4)) then
+      if ((igas .ne. igash2o) .and. (igas .ne. igash2so4) .and. (igas .ne. igass8) .and. (igas .ne. igass2) &
+	.and. (igas .ne. igaskcl) .and. (igas .ne. igaszns) .and. (igas .ne. igasna2s) &
+        .and. (igas .ne. igasmns) .and. (igas .ne. igascr) .and. (igas .ne. igasfe) &
+        .and. (igas .ne. igasmg2sio4) .and. (igas .ne. igastio2) .and. (igas .ne. igasal2o3) &
+        .and. (igas .ne. igasco)) then
         if (do_print) write(LUNOPRT,*) 'growevapl::ERROR - Invalid gas (', igas, ').'
         rc = -1
         return
@@ -95,11 +101,12 @@ subroutine growevapl(carma, cstate, iz, rc)
       ! Bypass calculation if few particles are present 
       if( pconmax(iz,igroup) .gt. FEW_PC )then
         do ibin = 1,NBIN-1
-
+          !write(*,*) igroup, ibin, igas, "before pheat"
           ! Determine the growth rate (dmdt). This calculation may take into account
           ! radiative effects on the particle which can affect the growth rates.
           call pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt(ibin), rc)
-
+	  ! write(*,*) 'growevapl', iz, igas, ibin, iepart, dmdt(ibin)
+          !write(*,*) "after pheat"
         enddo     ! ibin = 1,NBIN-1
 
         ! Now calculate condensation/evaporation production and loss rates.
@@ -109,6 +116,8 @@ subroutine growevapl(carma, cstate, iz, rc)
         ! First, use cubic fits to estimate concentration values at bin
         ! boundaries
         do ibin = 2,NBIN-1
+
+       ! write(*,*) ibin, "checkpoint 1"
 
           dpc = pc(iz,ibin,iepart) / dm(ibin,igroup)
           dpc1 = pc(iz,ibin+1,iepart) / dm(ibin+1,igroup)
@@ -126,6 +135,8 @@ subroutine growevapl(carma, cstate, iz, rc)
         enddo     ! ibin = 2,NBIN-2
 
         do ibin = 2,NBIN-2
+
+        !  write(*,*) ibin, "checkpoint 2"
 
           dpc = pc(iz,ibin,iepart) / dm(ibin,igroup)
           dpc1 = pc(iz,ibin+1,iepart) / dm(ibin+1,igroup)
@@ -181,6 +192,8 @@ subroutine growevapl(carma, cstate, iz, rc)
         ! range [<al(ibin)>,<ar(ibin)>]
         do ibin = 1,NBIN
 
+        ! write(*,*) ibin, "checkpoint 3"
+
           dpc = pc(iz,ibin,iepart) / dm(ibin,igroup)
 
           if( (ar(ibin)-dpc)*(dpc-al(ibin)) .le. 0._f )then
@@ -202,6 +215,8 @@ subroutine growevapl(carma, cstate, iz, rc)
         !
         !  Use upwind advection when courant number > 1.
         do ibin = 1,NBIN
+
+         ! write(*,*) ibin, "checkpoint 4"
           dpc = pc(iz,ibin,iepart) / dm(ibin,igroup)
           dela(ibin) = ar(ibin) - al(ibin)
           a6(ibin) = 6._f * ( dpc - 0.5_f*(ar(ibin)+al(ibin)) )
@@ -209,17 +224,19 @@ subroutine growevapl(carma, cstate, iz, rc)
 
         do ibin = 1,NBIN-1
 
+          !write(*,*) iz, ibin, igroup, dmdt(ibin)*dtime/dm(ibin,igroup)
+
           if( dmdt(ibin) .gt. 0._f .and. &
               pc(iz,ibin,iepart) .gt. SMALL_PC )then
 
             x = dmdt(ibin)*dtime/dm(ibin,igroup)
 
             if( x .lt. 1._f )then
-              growlg(ibin,igroup) = dmdt(ibin)/pc(iz,ibin,iepart) &
+              growlg(ibin,igroup) = (dmdt(ibin)/pc(iz,ibin,iepart) &
                        * ( ar(ibin) - 0.5*dela(ibin)*x + &
-                       (x/2._f - x**2/3._f)*a6(ibin) )
+                       (x/2._f - x**2/3._f)*a6(ibin) ))! * redugrow(igas)
             else
-              growlg(ibin,igroup) = dmdt(ibin) / dm(ibin,igroup)
+              growlg(ibin,igroup) = dmdt(ibin) / dm(ibin,igroup)! * redugrow(igas)
             endif
 
           elseif( dmdt(ibin) .lt. 0._f .and. &
@@ -231,23 +248,27 @@ subroutine growevapl(carma, cstate, iz, rc)
               evaplg(ibin+1,igroup) = -dmdt(ibin)/ &
                       pc(iz,ibin+1,iepart) &
                       * ( al(ibin+1) + 0.5_f*dela(ibin+1)*x + &
-                      (x/2._f - (x**2)/3._f)*a6(ibin+1) )
+                      (x/2._f - (x**2)/3._f)*a6(ibin+1) )! * redugrow(igas)
             else
-              evaplg(ibin+1,igroup) = -dmdt(ibin) / dm(ibin+1,igroup)
+              evaplg(ibin+1,igroup) = -dmdt(ibin) / dm(ibin+1,igroup)! * redugrow(igas)
             endif
 
             ! Boundary conditions: for evaporation out of first bin (with cores), 
             ! use evaporation rate from second bin.
 !            if( ibin .eq. 1 .and. ncore(igroup) .gt. 0 )then
             if( ibin .eq. 1)then
-              evaplg(1,igroup) = -dmdt(1) / dm(1,igroup)
+              evaplg(1,igroup) = -dmdt(1) / dm(1,igroup)! * redugrow(igas)
+	      !write(*,*) 'growevapl', evaplg(1,igroup), iz, igas, igroup
             endif
           endif
+
+	 !write(*,*) iz, ibin, igroup, evaplg(ibin,igroup), growlg(ibin,igroup), dmdt(ibin)
 
         enddo    ! ibin = 1,NBIN-1
       endif     ! (pconmax .gt. FEW_PC)
     endif      ! (igas = igrowgas(ielem)) .ne. 0 
   enddo       ! igroup = 1,NGROUP
+
 
   
   ! Return to caller with particle loss rates for growth and evaporation

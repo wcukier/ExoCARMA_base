@@ -20,6 +20,8 @@ subroutine setupvf_heymsfield2010(carma, cstate, j, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -47,7 +49,7 @@ subroutine setupvf_heymsfield2010(carma, cstate, j, rc)
     rhoa_cgs = rhoa(k) / (xmet(k)*ymet(k)*zmet(k))
 
     ! <vg> is mean thermal velocity of air molecules [cm/s]
-    vg = sqrt(8._f / PI * R_AIR * t(k))
+    vg = sqrt(8._f / PI * RGAS/wtmol_air(k) * t(k))
 
     ! <rmfp> is mean free path of air molecules [cm]
     rmfp = 2._f * rmu(k) / (rhoa_cgs * vg)
@@ -68,7 +70,9 @@ subroutine setupvf_heymsfield2010(carma, cstate, j, rc)
 
       dmax = 2._f * r_wet(k,i,j) * rrat(i,j)
       
-      x = (rhoa_cgs / (rmu(k)**2)) * ((8._f * rmass(i,j) * GRAV) / (PI * (arat(i,j)**0.5_f)))
+      x = (rhoa_cgs / (rmu(k)**2)) * ((8._f * rmass(i,j) &
+!        * grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f) / (PI * (arat(i,j)**0.5_f)))
+        * grav(k)) / (PI * (arat(i,j)**0.5_f)))
       
       ! Apply the slip correction factor. This is not included in the formulation
       ! from Heymsfield and Westbrook [2010].

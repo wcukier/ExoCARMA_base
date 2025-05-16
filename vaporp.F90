@@ -16,6 +16,8 @@ subroutine vaporp(carma, cstate, iz, igas, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -46,9 +48,51 @@ subroutine vaporp(carma, cstate, iz, igas, rc)
     case(I_VAPRTN_H2SO4_AYERS1980)
       call vaporp_h2so4_ayers1980(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
 
+    case(I_VAPRTN_S8_FERREIRA2011)
+      call vaporp_s8_ferreira2011(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_S8_ZAHNLE2016)
+      call vaporp_s8_zahnle2016(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_S2_LYONS2008)
+      call vaporp_s2_lyons2008(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_KCL_MORLEY2012)
+      call vaporp_kcl_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_ZNS_MORLEY2012)
+      call vaporp_zns_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_NA2S_MORLEY2012)
+      call vaporp_na2s_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_MNS_MORLEY2012)
+      call vaporp_mns_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_CR_MORLEY2012)
+      call vaporp_cr_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_FE_VISSCHER2010)
+      call vaporp_fe_visscher2010(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_MG2SIO4_VISSCHER2010)
+      call vaporp_mg2sio4_visscher2010(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_TIO2_LODDERS1999)
+      call vaporp_tio2_lodders1999(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_TIO2_HELLING2001)
+      call vaporp_tio2_helling2001(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_AL2O3_WAKEFORD2017)
+      call vaporp_al2o3_wakeford2017(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
+    case(I_VAPRTN_CO_WYLIE1958)
+      call vaporp_co_wylie1958(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+
     case default
-      if (do_print) write(LUNOPRT,*) "vaporp:: ERROR - Unknown vapor pressure routine  (", ivaprtn(igas), &
-        ") for gas (", igas, ")."
+      if (do_print) write(LUNOPRT,*) "vaporp:: ERROR - Unknown vapor pressure routine  (", &
+	ivaprtn(igas), ") for gas (", igas, ")."
       rc = RC_ERROR
       return
   end select

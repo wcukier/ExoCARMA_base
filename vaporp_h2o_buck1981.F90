@@ -13,6 +13,8 @@ subroutine vaporp_h2o_buck1981(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -57,7 +59,8 @@ subroutine vaporp_h2o_buck1981(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   !
   ! NOTE: Don't stop the simulation if the limits are exceeded.
   if (pvap_liq .le. 1.e-13_f) then
-    if (do_print) write(LUNOPRT,*) 'vaporp_buck1981::WARNING - Temperature (', t(iz), ') too small for iz = ', iz
+    if (do_print) write(LUNOPRT,*) 'vaporp_buck1981::WARNING - Temperature (',&
+	 t(iz), ') too small for iz = ', iz
     rc = RC_WARNING
   endif
 

@@ -20,6 +20,8 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -55,6 +57,8 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   ! Convert water vapor concentration to g/cm3:
   gc_cgs = gc(iz, igash2o) / (xmet(iz) * ymet(iz) * zmet(iz))
   
+!  write(*,*) gc_cgs,pvapl(iz, igash2o)
+
   ! Compute the sulfate composition based on Hanson parameterization
   ! to temperature and water vapor concentration.
   wtpct(iz) = wtpct_tabaz(carma, temp, gc_cgs, pvapl(iz, igash2o), rc)
@@ -86,6 +90,9 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   ! BUT this is in Atmospheres.  Convert ==> dynes/cm2
   pvap_liq = sulfeq * 1.01325e6_f  
   pvap_ice = sulfeq * 1.01325e6_f 
-  
+
+  !if ((pvap_liq/p(iz))*1.0e6_f < 1.0e-16_f) pvap_liq = (1.0e-16_f * p(iz)) / 1.0e6_f    !PETER
+  !if ((pvap_ice/p(iz))*1.0e6_f < 1.0e-16_f) pvap_ice = (1.0e-16_f * p(iz)) / 1.0e6_f    !PETER
+
   return
 end

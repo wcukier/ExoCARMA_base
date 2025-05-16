@@ -20,6 +20,8 @@ subroutine setupckern(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -52,6 +54,7 @@ subroutine setupckern(carma, cstate, rc)
 
   real(kind=f) :: rhoa_cgs
   real(kind=f) :: temp1, temp2
+  real(kind=f) :: tau
 
   real(kind=f) :: r1
   real(kind=f) :: di
@@ -127,6 +130,9 @@ subroutine setupckern(carma, cstate, rc)
   real(kind=f), parameter :: vwb1 = -0.186_f
   real(kind=f), parameter :: vwb3 = -0.0163_f
   real(kind=f), parameter :: ham  = 6.4e-13_f   ! erg, Hamaker constant
+  real(kind=f), parameter :: statc2c = 3.33564e-10_f
+  real(kind=f), parameter :: elec = 1.6e-19_f
+  real(kind=f), parameter :: charge = 30._f
   real(kind=f) :: hp, hpln, Enot, Einf
   logical      :: use_vw(NGROUP, NGROUP)
   integer      :: ielem
@@ -273,6 +279,12 @@ subroutine setupckern(carma, cstate, rc)
                   cstick_calc = cstick
                 end if
 
+		! Add in charging effects from Lavvas et al. (2010)
+		tau = ((charge*elec/statc2c)**2._f)*(r1*1e4_f)*(r2*1e4_f)/((r1 + r2)*temp1)
+                cstick_calc = tau/(exp(tau) - 1._f)
+
+		!write(*,*) cstick_calc,r1,r2
+
                 !  First calculate thermal coagulation kernel
                 rp  = r1 + r2
                 dp  = di + dj
@@ -332,8 +344,12 @@ subroutine setupckern(carma, cstate, rc)
                   ! <vfc_{larg,smal}> is the fallspeed in cartesian coordinates.!
                   vfc_smal = vf(k,i_smal,ig_smal) * zmet(k)
                   vfc_larg = vf(k,i_larg,ig_larg) * zmet(k)
+!                  vfc_smal = (vf(k,i_smal,ig_smal) + 8.0e-5_f / rhoa_cgs) * zmet(k)     !PETER
+!                  vfc_larg = (vf(k,i_larg,ig_larg) + 8.0e-5_f / rhoa_cgs) * zmet(k)     !PETER
   
-                  sk = vfc_smal * (vfc_larg - vfc_smal) / (r_larg*GRAV)
+!                  sk = vfc_smal * (vfc_larg - vfc_smal) / (r_larg*GRAV)
+!                  sk = abs(vfc_smal * (vfc_larg - vfc_smal)) / (r_larg*grav(k)*(RPLANET/(RPLANET+zc(k)))**2._f)             !PETERz
+                  sk = abs(vfc_smal * (vfc_larg - vfc_smal)) / (r_larg*grav(k))             !PETERz
      
                   if( sk .lt. 0.08333334_f )then
                     e1 = 0.
@@ -344,7 +360,7 @@ subroutine setupckern(carma, cstate, rc)
                   if( sk .lt. 1.214_f )then
                     e3  = 0._f
                   else
-                    e3  = 1._f/(1._f+.75_f*log(2._f*sk)/(sk-1.214_f))**2
+                    e3  = 1._f/(1._f+0.75_f*log(2._f*sk)/(sk-1.214_f))**2
                   endif
      
                   if( re_larg .lt. 1. )then
@@ -483,6 +499,8 @@ subroutine setupckern(carma, cstate, rc)
                 ! of (geometric) gravitational collection efficiency <cgr>.
                 vfc_1 = vf(k,i1,j1) * zmet(k)
                 vfc_2 = vf(k,i2,j2) * zmet(k)
+!                vfc_1 = (vf(k,i1,j1) + 8.0e-5_f / rhoa_cgs) * zmet(k)          !PETER
+!                vfc_2 = (vf(k,i2,j2) + 8.0e-5_f / rhoa_cgs) * zmet(k)          !PETER
                 cgr = e_coal * e_coll *  PI * rp**2 * abs( vfc_1 - vfc_2 )
   
                 ! Long's (1974) kernel that only depends on size of larger droplet
@@ -495,6 +513,10 @@ subroutine setupckern(carma, cstate, rc)
                 ! Now combine all the coagulation and collection kernels into the
                 ! overall kernel.
                 ckernel(k,i1,i2,j1,j2) = cbr + ccd + cgr
+		!write(*,*) i1,i2,zc(k),ckernel(k,i1,i2,j1,j2)
+
+ 		!write(*,*) cbr + ccd + cgr
+ 		!write(*,*) ckernel(k,i1,i2,j1,j2)
                 
                 ! To avoid generation of large, non-physical hydrometeors by
                 ! coagulation, cut down ckernel for large radii

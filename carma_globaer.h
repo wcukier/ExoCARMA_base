@@ -36,9 +36,11 @@
 
 !  Model logical units for I/O
 #define LUNOPRT       carma%f_LUNOPRT
+#define lundiag       carma%f_lundiag
 
 !  Model startup control variables
 #define do_print      carma%f_do_print
+#define do_printdiag  carma%f_do_printdiag
 
 !  Gridding Information
 #define igridv        cstate%f_igridv
@@ -68,6 +70,7 @@
 ! Gas object
 #define gasname(igas)         carma%f_gas(igas)%f_name
 #define gwtmol(igas)          carma%f_gas(igas)%f_wtmol
+#define gwtmol_dif(igas)        carma%f_gas(igas)%f_wtmol_dif
 #define ivaprtn(igas)         carma%f_gas(igas)%f_ivaprtn
 #define igcomp(igas)          carma%f_gas(igas)%f_icomposition
 #define dgc_threshold(igas)   carma%f_gas(igas)%f_dgc_threshold
@@ -102,6 +105,8 @@
 #define rmassmin(igroup)        carma%f_group(igroup)%f_rmassmin
 #define rup(ibin,igroup)        carma%f_group(igroup)%f_rup(ibin)
 #define rlow(ibin,igroup)       carma%f_group(igroup)%f_rlow(ibin)
+#define rm(ibin,igroup)         carma%f_group(igroup)%f_rm(ibin)
+#define fdim(ibin,igroup)       carma%f_group(igroup)%f_fdim(ibin)
 #define icorelem(icore,igroup)  carma%f_group(igroup)%f_icorelem(icore)
 #define ifallrtn(igroup)        carma%f_group(igroup)%f_ifallrtn
 #define arat(ibin,igroup)       carma%f_group(igroup)%f_arat(ibin) 
@@ -156,7 +161,10 @@
 #define icollec       carma%f_icollec
 #define itbnd_pc      carma%f_itbnd_pc
 #define ibbnd_pc      carma%f_ibbnd_pc
+#define itbnd_gc      carma%f_itbnd_gc
+#define ibbnd_gc      carma%f_ibbnd_gc
 #define inucgas       carma%f_inucgas
+#define mucos         carma%f_mucos
 #define igrowgas      carma%f_igrowgas
 #define nnuc2elem     carma%f_nnuc2elem
 #define ievp2elem     carma%f_ievp2elem
@@ -171,6 +179,18 @@
 #define dt_threshold  carma%f_dt_threshold
 #define igash2o       carma%f_igash2o
 #define igash2so4     carma%f_igash2so4
+#define igass8        carma%f_igass8
+#define igass2        carma%f_igass2
+#define igaskcl        carma%f_igaskcl
+#define igaszns        carma%f_igaszns
+#define igasna2s        carma%f_igasna2s
+#define igasmns        carma%f_igasmns
+#define igascr        carma%f_igascr
+#define igasfe        carma%f_igasfe
+#define igasmg2sio4        carma%f_igasmg2sio4
+#define igastio2        carma%f_igastio2
+#define igasal2o3        carma%f_igasal2o3
+#define igasco        carma%f_igasco
 #define igasso2       carma%f_igasso2
 #define tstick        carma%f_tstick
 #define gsticki       carma%f_gsticki
@@ -207,9 +227,15 @@
 #define thcond        cstate%f_thcond
 #define thcondnc      cstate%f_thcondnc
 #define dkz           cstate%f_dkz
+#define ekz           cstate%f_ekz
+#define met           cstate%f_met
+#define t0           cstate%f_t0
+#define wtmol_air     cstate%f_wtmol_air
+#define grav     cstate%f_grav
 
 ! Model primary vars
 #define pc            cstate%f_pc
+#define pc_psolve     cstate%f_pc_psolve
 #define pcd           cstate%f_pcd
 #define pc_surf       cstate%f_pc_surf
 #define gc            cstate%f_gc
@@ -226,8 +252,11 @@
 #define pconmax       cstate%f_pconmax
 #define coaglg        cstate%f_coaglg
 #define coagpe        cstate%f_coagpe
+#define coagprod      cstate%f_coagprod
+#define coagloss      cstate%f_coagloss
 #define rnuclg        cstate%f_rnuclg
 #define rnucpe        cstate%f_rnucpe
+#define rnucpeup      cstate%f_rnucpeup
 #define rhompe        cstate%f_rhompe
 #define pc_nucl       cstate%f_pc_nucl
 #define growpe        cstate%f_growpe
@@ -238,7 +267,19 @@
 #define evcore        cstate%f_evcore
 #define growlg        cstate%f_growlg
 #define evaplg        cstate%f_evaplg
+#define redugrow      cstate%f_redugrow
 #define gasprod       cstate%f_gasprod
+#define gasprod_tot   cstate%f_gasprod_tot
+#define rnucpeup_tot  cstate%f_rnucpeup_tot 
+#define rhompe_tot    cstate%f_rhompe_tot
+#define growpe_tot    cstate%f_growpe_tot
+#define rnuclg_tot    cstate%f_rnuclg_tot
+#define growlg_tot    cstate%f_growlg_tot
+#define evaplg_tot    cstate%f_evaplg_tot
+#define rnucpe_tot    cstate%f_rnucpe_tot
+#define evappe_tot    cstate%f_evappe_tot
+#define phochemprod    cstate%f_phochemprod
+#define phochemprod_gas    cstate%f_phochemprod_gas
 #define rlheat        cstate%f_rlheat
 #define cmf           cstate%f_cmf
 #define totevap       cstate%f_totevap
@@ -246,6 +287,19 @@
 #define pc_botbnd     cstate%f_pc_botbnd
 #define ftoppart      cstate%f_ftoppart
 #define fbotpart      cstate%f_fbotpart
+#define vertupin_sum  cstate%f_vertupin_sum
+#define vertupout_sum cstate%f_vertupout_sum
+#define vertdnin_sum  cstate%f_vertdnin_sum
+#define vertdnout_sum cstate%f_vertdnout_sum
+#define gc_topbnd     cstate%f_gc_topbnd
+#define gc_botbnd     cstate%f_gc_botbnd
+#define ftopgas       cstate%f_ftopgas
+#define fbotgas       cstate%f_fbotgas
+#define gflux         cstate%f_gflux
+#define pflux         cstate%f_pflux
+#define winds         cstate%f_winds
+#define vertpartflux  cstate%f_vertpartflux
+#define vertgasflux   cstate%f_vertgasflux
 #define cmf           cstate%f_cmf
 #define totevap       cstate%f_totevap
 #define too_small     cstate%f_too_small
@@ -297,6 +351,8 @@
 #define surfctia      cstate%f_surfctia
 #define akelvin       cstate%f_akelvin
 #define akelvini      cstate%f_akelvini
+#define surfacetens   cstate%f_surfacetens
+#define desorption   cstate%f_desorption
 #define ft            cstate%f_ft
 #define gro           cstate%f_gro
 #define gro1          cstate%f_gro1

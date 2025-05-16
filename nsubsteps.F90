@@ -13,6 +13,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -66,10 +68,11 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
           ! element of particle number concentration  
           iepart = ienconc(ig)
           
-          if( itype(iepart) .eq. I_INVOLATILE ) then
+          if( (itype(iepart) .eq. I_INVOLATILE) .or. &
+	    (itype(iepart) .eq. I_VOLATILE) ) then
   
             ! condensing gas
-            igas = inucgas(ig)
+            igas = inucgas(ig,1)
   
             if (igas /= 0) then
           
@@ -78,10 +81,12 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
               do inuc = 1,nnuc2elem(iepart)
                 ienucto = inuc2elem(inuc,iepart)
     
-                if( inucproc(iepart,ienucto) .eq. I_DROPACT ) then
+                if( (inucproc(iepart,ienucto) .eq. I_DROPACT) .or. &
+		  (inucproc(iepart,ienucto) .eq. I_HETGEN) ) then
                   do ibin = 1, NBIN
-                    if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) .gt. conmax * pconmax(iz,ig) .and. &
-                        ss .gt. scrit(iz,ibin,ig) )then
+                    if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) &
+			.gt. conmax * pconmax(iz,ig) .and. &
+                        ss .gt. scrit(iz,ibin,ig,igas) )then
                       ntsubsteps = maxsubsteps
                     endif
                   enddo
@@ -92,7 +97,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
           elseif( itype(iepart) .eq. I_VOLATILE ) then
           
             do ibin = NBIN-1, 1, -1
-              if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) .gt. conmax * pconmax(iz,ig) )then
+              if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) &
+		.gt. conmax * pconmax(iz,ig) )then
                 ibin_small(ig) = ibin
               endif
             enddo
@@ -130,8 +136,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
                 pvap = pvapl(iz,igas)
               endif
     
-              g0 = gro(iz,ibin_small(ig),ig)
-              g1 = gro1(iz,ibin_small(ig),ig)
+              g0 = gro(iz,ibin_small(ig),ig,igas)
+              g1 = gro1(iz,ibin_small(ig),ig,igas)
               dmdt = abs( pvap * ss * g0 / ( 1._f + g0*g1*pvap ) )
               
               if (dmdt /= 0._f) then
@@ -155,7 +161,7 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
         iepart = ienconc(ig)
 
         ! condensing gas
-        igas = inucgas(ig)
+        igas = inucgas(ig,1)
 
         if (igas /= 0) then
           

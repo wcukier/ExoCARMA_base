@@ -16,6 +16,8 @@ subroutine upgxfer(carma, cstate, iz, ibin, ielem, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -126,6 +128,7 @@ subroutine upgxfer(carma, cstate, iz, ibin, ielem, rc)
                     pc(iz,ifrom,iefrom) * elemass**ipow
 
             rnucpe(ibin,ielem) = rnucpe(ibin,ielem) + rnucprod
+          !write(*,*) iz,ibin,ielem,ipow,rnucpe(ibin,ielem)
 
             ! Calculate latent heat associated with nucleation to <ibin,ielem>
             ! from <ifrom,iefrom>

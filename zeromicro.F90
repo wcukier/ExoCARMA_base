@@ -13,6 +13,8 @@ subroutine zeromicro(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -39,6 +41,7 @@ subroutine zeromicro(carma, cstate, iz, rc)
 
     rhompe(:, :)  = 0._f
     rnucpe(:,:)   = 0._f
+    rnucpeup(:,:) = 0._f		!PETER
     growpe(:,:)   = 0._f
     evappe(:,:)   = 0._f
     rnuclg(:,:,:) = 0._f

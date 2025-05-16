@@ -26,6 +26,8 @@ subroutine setupgrow(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -40,7 +42,7 @@ subroutine setupgrow(carma, cstate, rc)
   integer                        :: ielem    !! element index
   integer                        :: k        !! z index
   integer                        :: i
-  real(kind=f)                   :: rhoa_cgs, aden
+  real(kind=f)                   :: rhoa_cgs, aden, wtpctf
   ! Define formats
   1 format(a,':  ',12i6)
   2 format(a,':  ',i6)
@@ -63,8 +65,11 @@ subroutine setupgrow(carma, cstate, rc)
 
     ! Diffusivity of water vapor in air from Pruppacher & Klett (eq. 13-3);
     ! units are [cm^2/s].
-    if (igash2o /= 0) then 
-      diffus(k, igash2o) = 0.211_f * (1.01325e+6_f / p(k)) * (t(k) / 273.15_f )**1.94_f
+    if (igash2o .ne. 0) then 
+      rhoa_cgs = rhoa(k) / (xmet(k) * ymet(k) * zmet(k))
+!      diffus(k, igash2o) = 0.211_f * (1.01325e+6_f / p(k)) * (t(k) / 273.15_f )**1.94_f
+      diffus(k, igash2o) = 5._f / (16._f * AVG * COLDIA_H2O**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2O + wtmol_air(k)) / (2._f * PI * WTMOL_H2O)) 
   
       ! Latent heat of evaporation for water; units are [cm^2/s^2]
       if (do_cnst_rlh) then
@@ -89,16 +94,131 @@ subroutine setupgrow(carma, cstate, rc)
     end if
 
     ! Properties for H2SO4
-    if (igash2so4 /= 0) then
+    if (igash2so4 .ne. 0) then
       ! Diffusivity
       rhoa_cgs = rhoa(k) / (xmet(k) * ymet(k) * zmet(k))
-      aden     = rhoa_cgs * AVG / WTMOL_AIR
-      diffus(k,igash2so4) = 1.76575e+17_f * sqrt(t(k)) / aden
+      aden     = rhoa_cgs * AVG / wtmol_air(k)
+      diffus(k,igash2so4) = 5._f / (16._f * AVG * COLDIA_H2SO4**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2SO4 + wtmol_air(k)) / (2._f * PI * WTMOL_H2SO4)) 
   
+      wtpctf = wtpct(k)/100._f
       ! HACK: make H2SO4 latent heats same as water
-      rlhe(k,igash2so4) = rlhe(k, igash2o)
-      rlhm(k,igash2so4) = rlhe(k, igash2o)
+!      rlhe(k,igash2so4) = rlhe(k, igash2o)
+!      rlhm(k,igash2so4) = rlhe(k, igash2o)
+      ! From Jang et al. 2006, Transactions of the Korean Nuclear Society Autumn Meeting
+      rlhe(k,igash2so4) = 1364.93*wtpctf**3._f - 1226.46*wtpctf**2._f + 382.23*wtpctf + 540.52
+      rlhe(k,igash2so4) = rlhe(k,igash2so4) * 4.184e7_f
+      rlhm(k,igash2so4) = rlhe(k,igash2so4)
     end if
+
+    ! Properties for S8
+    if (igass8 .ne. 0) then
+      ! Diffusivity
+      diffus(k,igass8) = 5._f / (16._f * AVG * COLDIA_S8**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_S8 + wtmol_air(k)) / (2._f * PI * WTMOL_S8)) 
+      rlhe(k,igass8) = RLH_CNST_SX ! http://cameochemicals.noaa.gov/chris/SXX.pdf
+      rlhm(k,igass8) = rlhe(k, igass8)
+    end if
+
+    ! Properties for S2
+    if (igass2 .ne. 0) then
+      ! Diffusivity
+      diffus(k,igass2) = 5._f / (16._f * AVG * COLDIA_S2**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_S2 + wtmol_air(k)) / (2._f * PI * WTMOL_S2)) 
+      rlhe(k,igass2) = RLH_CNST_SX ! http://cameochemicals.noaa.gov/chris/SXX.pdf
+      rlhm(k,igass2) = rlhe(k, igass2)
+    end if
+
+    ! Properties for KCl
+    if (igaskcl .ne. 0) then
+      ! Diffusivity
+      diffus(k,igaskcl) = 5._f / (16._f * AVG * COLDIA_KCL**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_KCL + wtmol_air(k)) / (2._f * PI * WTMOL_KCL)) 
+      rlhe(k,igaskcl) = TCOEFF_KCL * log(10._f) * RGAS / WTMOL_KCL ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igaskcl) = rlhe(k, igaskcl)
+    end if
+
+    ! Properties for ZnS
+    if (igaszns .ne. 0) then
+      ! Diffusivity
+      diffus(k,igaszns) = 5._f / (16._f * AVG * COLDIA_ZNS**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_ZN + wtmol_air(k)) / (2._f * PI * WTMOL_ZN)) 
+      rlhe(k,igaszns) = TCOEFF_ZNS * log(10._f) * RGAS / WTMOL_ZN ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igaszns) = rlhe(k, igaszns)
+    end if
+
+    ! Properties for Na2S
+    if (igasna2s .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasna2s) = 0.5_f * 5._f / (16._f * AVG * COLDIA_NA2S**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_NA + wtmol_air(k)) / (2._f * PI * WTMOL_NA)) 
+      rlhe(k,igasna2s) = TCOEFF_NA2S * log(10._f) * RGAS / WTMOL_NA ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igasna2s) = rlhe(k, igasna2s)
+    end if
+
+    ! Properties for MnS
+    if (igasmns .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasmns) = 5._f / (16._f * AVG * COLDIA_MNS**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_MN + wtmol_air(k)) / (2._f * PI * WTMOL_MN)) 
+      rlhe(k,igasmns) = TCOEFF_MNS * log(10._f) * RGAS / WTMOL_MN ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igasmns) = rlhe(k, igasmns)
+    end if
+
+    ! Properties for Cr
+    if (igascr .ne. 0) then
+      ! Diffusivity
+      diffus(k,igascr) = 5._f / (16._f * AVG * COLDIA_CR**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_CR + wtmol_air(k)) / (2._f * PI * WTMOL_CR)) 
+      rlhe(k,igascr) = TCOEFF_CR * log(10._f) * RGAS / WTMOL_CR ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igascr) = rlhe(k, igascr)
+    end if
+
+    ! Properties for Fe
+    if (igasfe .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasfe) = 5._f / (16._f * AVG * COLDIA_FE**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_FE + wtmol_air(k)) / (2._f * PI * WTMOL_FE)) 
+      rlhe(k,igasfe) = TCOEFF_FE * log(10._f) * RGAS / WTMOL_FE ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igasfe) = rlhe(k, igasfe)
+    end if
+
+    ! Properties for Mg2SiO4
+    if (igasmg2sio4 .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasmg2sio4) = 0.5_f *  5._f / (16._f * AVG * COLDIA_MG2SIO4**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_MG + wtmol_air(k)) / (2._f * PI * WTMOL_MG)) 
+      rlhe(k,igasmg2sio4) = TCOEFF_MG2SIO4 * log(10._f) * RGAS / WTMOL_MG ! Charnay et al. 2015, ApJL 813, L1; neglecting PT part
+      rlhm(k,igasmg2sio4) = rlhe(k, igasmg2sio4)
+    end if
+
+    ! Properties for TiO2
+    if (igastio2 .ne. 0) then
+      ! Diffusivity
+      diffus(k,igastio2) = 5._f / (16._f * AVG * COLDIA_TIO2**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_TIO2 + wtmol_air(k)) / (2._f * PI * WTMOL_TIO2)) 
+      rlhe(k,igastio2) = TCOEFF_TIO2_HELLING * log(10._f) * RGAS / WTMOL_TIO2 ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igastio2) = rlhe(k, igastio2)
+    end if
+
+    ! Properties for Al2O3
+    if (igasal2o3 .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasal2o3) = 0.5_f * 5._f / (16._f * AVG * COLDIA_AL2O3**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_AL + wtmol_air(k)) / (2._f * PI * WTMOL_AL)) 
+      rlhe(k,igasal2o3) = TCOEFF_AL2O3 * log(10._f) * RGAS / WTMOL_AL ! Charnay et al. 2015, ApJL 813, L1
+      rlhm(k,igasal2o3) = rlhe(k, igasal2o3)
+    end if
+
+    ! Properties for CO
+    if (igasco .ne. 0) then
+      ! Diffusivity
+      diffus(k,igasco) = 5._f / (16._f * AVG * COLDIA_CO**2_f * rhoa_cgs * COLINT) * &
+  	sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_CO + wtmol_air(k)) / (2._f * PI * WTMOL_CO)) 
+      rlhe(k,igasco) = 2.63e9_f ! @ triple point; Bierhals et al. Ullmann's Encyclopedia of Industrial Chemistry
+      rlhm(k,igasco) = rlhe(k, igasco)
+    end if
+
     
   enddo
 

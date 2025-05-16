@@ -13,6 +13,8 @@ subroutine setupbins(carma, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carma_mod
 
@@ -106,7 +108,7 @@ subroutine setupbins(carma, rc)
   do ig = 1,NGROUP
     ie = ienconc(ig)
     do ibin = 1,NBIN
-      tmp_rhop(ibin, ig) = rhoelem(ibin, ie)
+        tmp_rhop(ibin, ig) = rhoelem(ibin, ie)
 
         !  Set initial density of all hydrometeor groups to 1 such that nucleation
         !  mapping arrays are calculated correctly.
@@ -131,29 +133,52 @@ subroutine setupbins(carma, rc)
 
   do igrp = 1, NGROUP
 
+    !write(*,*) cpi, tmp_rhop(1,igrp), rmin(igrp), fdim(1,igrp), rm(1,igrp) 
+    
     vrfact = ( (3._f/2._f/PI/(rmrat(igrp)+1._f))**(ONE/3._f) )* &
             ( rmrat(igrp)**(ONE/3._f) - 1._f )
 
     ! If rmassmin wasn't specified, then use rmin to determine the mass
     ! of the first bin.
     if (rmassmin(igrp) == 0._f) then
-      rmassmin(igrp) = cpi*tmp_rhop(1,igrp)*rmin(igrp)**3
+      if (ishape(igrp) .eq. I_FRACTAL) then
+        rmassmin(igrp) = cpi*tmp_rhop(1,igrp)*(rmin(igrp)**fdim(1,igrp))*(rm(1,igrp)**(3._f - fdim(1,igrp)))
+      else
+        rmassmin(igrp) = cpi*tmp_rhop(1,igrp)*rmin(igrp)**3   
+      endif
     else
       
       ! Just for internal consistency, recalculate rmin based on the rmass
       ! that is being used.
-      rmin(igrp) = (rmassmin(igrp) / cpi / tmp_rhop(1,igrp)) ** (1._f / 3._f)
+      rmin(igrp) = (rmassmin(igrp) / cpi / tmp_rhop(1,igrp)) ** (1._f / 3._f) ! ASSUMING SPHERE
     end if
     
     do j = 1, NBIN
+
+      !write(*,*) 'Got way far into setupbins!', j
+
       rmass(j,igrp)   = rmassmin(igrp) * rmrat(igrp)**(j-1)
-      rmassup(j,igrp) = 2._f*rmrat(igrp)/(rmrat(igrp)+1._f)*rmass(j,igrp)
-      dm(j,igrp)      = 2._f*(rmrat(igrp)-1._f)/(rmrat(igrp)+1._f)*rmass(j,igrp)
-      vol(j,igrp) = rmass(j,igrp) / tmp_rhop(j,igrp)
-      r(j,igrp)   = ( rmass(j,igrp)/tmp_rhop(j,igrp)/cpi )**(ONE/3._f)
-      rup(j,igrp) = ( rmassup(j,igrp)/tmp_rhop(j,igrp)/cpi )**(ONE/3._f)
-      dr(j,igrp)  = vrfact*(rmass(j,igrp)/tmp_rhop(j,igrp))**(ONE/3._f)
-      rlow(j,igrp) = rup(j,igrp) - dr(j,igrp)
+      rmassup(j,igrp) = 2._f*rmrat(igrp) &
+	/(rmrat(igrp) + 1._f)*rmass(j,igrp)
+      dm(j,igrp)      = 2._f*&
+	(rmrat(igrp)-1._f) &
+	/(rmrat(igrp)+1._f) &
+	*rmass(j,igrp)
+      if (ishape(igrp) .eq. I_FRACTAL) then
+        r(j,igrp)   = ( rmass(j,igrp)/tmp_rhop(j,igrp)/cpi/rm(j,igrp)**(3._f - fdim(j,igrp)))**(ONE/fdim(j,igrp))
+        rup(j,igrp) = ( rmassup(j,igrp)/tmp_rhop(j,igrp)/cpi/rm(j,igrp)**(3._f - fdim(j,igrp)))**(ONE/fdim(j,igrp))
+        dr(j,igrp)  = ( (3._f/2._f/PI/(rmrat(igrp)+1._f)*rm(j,igrp)**(fdim(j,igrp) &
+          - 3._f))**(ONE/fdim(j,igrp)) )*( rmrat(igrp)**(ONE/fdim(j,igrp)) - 1._f ) &
+	  *(rmass(j,igrp)/tmp_rhop(1,igrp))**(ONE/fdim(j,igrp))
+        rlow(j,igrp) = rup(j,igrp) - dr(j,igrp)
+        vol(j,igrp) = cpi*(r(j,igrp)**fdim(j,igrp))*(rm(j,igrp)**(3._f - fdim(j,igrp))) ! Actual volume of solid material
+      else
+        vol(j,igrp) = rmass(j,igrp) / tmp_rhop(j,igrp)
+        r(j,igrp)   = ( rmass(j,igrp)/tmp_rhop(j,igrp)/cpi )**(ONE/3._f)
+        rup(j,igrp) = ( rmassup(j,igrp)/tmp_rhop(j,igrp)/cpi )**(ONE/3._f)
+        dr(j,igrp)  = vrfact*(rmass(j,igrp)/tmp_rhop(j,igrp))**(ONE/3._f)
+        rlow(j,igrp) = rup(j,igrp) - dr(j,igrp)
+      endif
     enddo
   enddo
   

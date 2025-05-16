@@ -18,6 +18,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod
@@ -55,6 +57,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod
@@ -115,6 +119,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod
@@ -128,7 +134,8 @@ contains
     real(kind=f)                         :: planckBandIntensityWidger1976  !! Planck intensity (erg/s/cm2/sr/cm)
     
     ! Calculate the integral from the edges to 0 and subtract.
-    planckBandIntensityWidger1976 = (planckIntensityWidger1976(wvl + (dwvl / 2._f), temp, miniter) - planckIntensityWidger1976(wvl - (dwvl / 2._f), temp, miniter)) / dwvl
+    planckBandIntensityWidger1976 = (planckIntensityWidger1976(wvl + (dwvl / 2._f), &
+	temp, miniter) - planckIntensityWidger1976(wvl - (dwvl / 2._f), temp, miniter)) / dwvl
 
     return 
   end function
@@ -148,6 +155,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod
@@ -202,6 +211,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod

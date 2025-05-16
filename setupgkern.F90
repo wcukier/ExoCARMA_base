@@ -35,6 +35,8 @@ subroutine setupgkern(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -49,6 +51,7 @@ subroutine setupgkern(carma, cstate, rc)
   ! Local declarations
   integer                        :: igas     !! gas index
   integer                        :: ielem    !! element index
+  integer                        :: inuc     ! nucleation index
   integer                        :: k        !! z index
   integer                        :: igroup   !! group index
   integer                        :: i
@@ -74,8 +77,8 @@ subroutine setupgkern(carma, cstate, rc)
   real(kind=f)                   :: x1
   real(kind=f)                   :: x2
   real(kind=f)                   :: fv
-  real(kind=f)                   :: surf_tens  ! surface tension of H2SO4 particle
-  real(kind=f)                   :: rho_H2SO4  ! wet density of H2SO4 particle
+  real(kind=f)                   :: surf_tens(NZ)  ! surface tension of non-H2O particles
+  real(kind=f)                   :: rho_part  ! density of non-H2O particle
   
 
   ! Calculate gas properties for all of the gases. Better to do them all once, than to
@@ -96,6 +99,9 @@ subroutine setupgkern(carma, cstate, rc)
       ! from Pruppacher and Klett (eq. 5-12).
       surfctwa(:) = 76.10_f - 0.155_f*( t(:) - 273.16_f )
 
+      !PETER: This is the surfctwa for liquid H2SO4 vs. air, from Myhre et al., 1998 (data).
+ !     surfctwa(:) = 70.03_f - 0.039_f*( t(:) - T0 )
+
       ! <surfctiw> is surface tension of water-ice interface
       ! from Pruppacher and Klett (eq. 5-48).!
       surfctiw(:) = 28.5_f + 0.25_f*( t(:) - 273.16_f )
@@ -103,7 +109,9 @@ subroutine setupgkern(carma, cstate, rc)
       ! <surfctiw> is surface tension of water-ice interface
       ! from Hale and Plummer [J. Chem. Phys., 61, 1974].
       surfctia(:) = 141._f - 0.15_f * t(:)
-
+	  
+	  surfacetens(:,igas) = surfctwa(:) 
+	  
       ! <akelvin> is argument of exponential in kelvin curvature term.
       akelvin(:,igas) = 2._f*gwtmol(igas)*surfctwa(:) &
                         / ( t(:)*RHO_W*RGAS )
@@ -113,18 +121,166 @@ subroutine setupgkern(carma, cstate, rc)
                         
     ! condensing gas is H2SO4                    
     else if (igas .eq. igash2so4) then
-    
       ! Calculate Kelvin curvature factor for H2SO4 interactively with temperature:
       do k = 1, NZ  
-        surf_tens = sulfate_surf_tens(carma, wtpct(k), t(k), rc)
-        rho_H2SO4 = sulfate_density(carma, wtpct(k), t(k), rc)
-        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens / (t(k) * rho_H2SO4 * RGAS)
+        surf_tens(k) = sulfate_surf_tens(carma, wtpct(k), t(k), rc)
+        rho_part = sulfate_density(carma, wtpct(k), t(k), rc)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * rho_part * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
         
         ! Not doing condensation of h2So4 on ice, so just set it to the value
         ! for water vapor.
-        akelvini(k, igas) = akelvini(k, igash2o)
+        akelvini(k, igas) = akelvini(k, igas)
       end do   
-    else 
+    else if ((igas .eq. igass8) .or. (igas .eq. igass2)) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 60.8_f ! http://cameochemicals.noaa.gov/chris/SXX.pdf, Fanelli 1950
+        rho_part = 1.96_f ! http://periodictable.com/Elements/016/data.html
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_SX * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do 
+    else if (igas .eq. igaskcl) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 160.4_f - 0.07_f*(t(k)-273.15_f) ! http://www.kayelaby.npl.co.uk/general_physics/2_2/2_2_5.html 
+!        surf_tens(k) = 4._f*(160.4_f - 0.07_f*t(k)) ! http://www.kayelaby.npl.co.uk/general_physics/2_2/2_2_5.html 
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_KCL * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do   
+    else if (igas .eq. igaszns) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        !surf_tens(k) = 1672._f ! Celikkaya & Akinc 1990, Journal of the American Ceramic Society 73, 2360
+        surf_tens(k) = 860._f ! Zhang et al. 2003, J. Phys. Chem. B 2003, 107, 13051-13060
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_ZNS * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasna2s) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        !surf_tens(k) = 160.4_f - 0.07_f*t(k) ! Assume same as KCl 
+        surf_tens(k) = 1033._f ! Graham Lee's calculations, estimated from enthalpy data  
+        !surf_tens(k) = 50._f ! DON'T KNOW
+        surfacetens(k, igas) = surf_tens(k)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_NA2S * RGAS)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasmns) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        !surf_tens(k) = 50._f ! DON'T KNOW
+        !surf_tens(k) = 160.4_f - 0.07_f*t(k) ! Assume same as KCl  
+        surf_tens(k) = 2326._f ! Graham Lee's calculations, estimated from enthalpy data  
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_MNS * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igascr) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 1642._f - 0.2_f * ( t(k) - 2133.15_f ) ! http://www.kayelaby.npl.co.uk/general_physics/2_2/2_2_5.html 
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_CR * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasfe) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 1862._f - 0.39_f * ( t(k) - 1803.15_f ) ! http://www.kayelaby.npl.co.uk/general_physics/2_2/2_2_5.html 
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_FE * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasmg2sio4) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 436._f !Kazasa et al. 1989!1280._f ! Miura et al. (2010)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_MG2SIO4 * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+             
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igastio2) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        !surf_tens(k) = 480._f ! Lee et al. (2014)
+        surf_tens(k) = 535.124_f - 0.04396_f * t(k) ! Lee et al. (2015)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_TIO2 * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasal2o3) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        surf_tens(k) = 690._f !Kazasa et al. 1989!900._f ! Dobrovinskaya et al. (2009)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_AL2O3 * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        desorption(igas) = 0.5_f
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else if (igas .eq. igasco) then
+      ! Calculate Kelvin curvature factor for polysulfur interactively with temperature:
+      do k = 1, NZ  
+        !surf_tens(k) = 9.8_f ! Bierhals J; Ullmann's Encyclopedia of Industrial Chemistry. (2002).
+        surf_tens(k) = max(27.77_f*(1._f - t(k)/132.92_f)**1.126_f,1e-5_f) ! Sprow & Prausnitz (1965)
+        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * RHO_CO * RGAS)
+        surfacetens(k, igas) = surf_tens(k)
+        
+        ! Not doing condensation of h2So4 on ice, so just set it to the value
+        ! for water vapor.
+        akelvini(k, igas) = akelvin(k, igas)
+      end do  
+    else
 
       ! Condensing gas is not yet configured.
       if (do_print) write(LUNOPRT,*) 'setupgkern::ERROR - invalid igas'
@@ -134,14 +290,22 @@ subroutine setupgkern(carma, cstate, rc)
 
     ! Molecular free path of condensing gas 
     freep(:,igas)  = 3._f*diffus(:,igas) &
-             * sqrt( ( PI*gwtmol(igas) ) / ( 8._f*RGAS*t(:) ) )
+             * sqrt( ( PI*gwtmol_dif(igas) ) / ( 8._f*RGAS*t(:) ) )
 
     ! Thermal free path of condensing gas
     freept(:,igas) = freep(:,igas)*thcond(:) / &
                ( diffus(:,igas) * rhoa_cgs(:, igas) &
-             * ( CP - RGAS/( 2._f*WTMOL_AIR ) ) )
+             * ( CP - RGAS/( 2._f*wtmol_air(:) ) ) )
   end do
   
+  !write(LUNOPRT,*) 'rmu ', rmu(:)
+  !write(LUNOPRT,*) 'thcond ', thcond(:)
+  !write(LUNOPRT,*) 'cp ', CP
+  !write(LUNOPRT,*) 'pvapl ', pvapl(:,igash2so4)
+  !write(LUNOPRT,*) 'surf tens ', surf_tens(:)
+  !write(LUNOPRT,*) 'diffus ', diffus(:,igash2so4)
+  !write(LUNOPRT,*) 'rlhe ', rlhe(:,igash2so4)
+
 
   ! Loop over aerosol groups only (no radius, gas, or spatial dependence).
   do igroup = 1, NGROUP
@@ -154,7 +318,7 @@ subroutine setupgkern(carma, cstate, rc)
     endif
 
     ! Non-spherical corrections (need a reference for these)
-    if( ishape(igroup) .eq. I_SPHERE )then
+    if( (ishape(igroup) .eq. I_SPHERE) .or. (ishape(igroup) .eq. I_FRACTAL))then
 
       !   Spheres
       cor = 1._f
@@ -198,10 +362,121 @@ subroutine setupgkern(carma, cstate, rc)
     
     ! If the group doesn't grow, but is involved in aerosol
     ! freezing, then the gas properties still need to be calculated.
-    if( igas .eq. 0 ) igas = inucgas(igroup)
+    if( igas .eq. 0 ) then
+      do inuc = 1,nnuc2elem(ielem)
+        igas = inucgas(ielem,inuc2elem(inuc, ielem))
+	!write(*,*) 'IGAS', inuc, ielem,inuc2elem(inuc,ielem), igas
 
-    if( igas .ne. 0 )then
+        if( igas .ne. 0 )then
 
+          do k = 1, NZ
+
+            ! Latent heat of condensing gas 
+            if( is_grp_ice(igroup) )then
+              rlh = rlhe(k,igas) + rlhm(k,igas)
+            else
+              rlh = rlhe(k,igas)
+            endif
+
+            ! Radius-dependent parameters 
+            do i = 1, NBIN
+
+              br = rlow_wet(k,i,igroup)     ! particle bin Boundary Radius
+
+              ! These are Knudsen numbers
+              rknudn  = freep(k,igas) / br
+              rknudnt = freept(k,igas) / br
+
+              ! These are "lambdas" used in correction for gas kinetic effects.
+              rlam  = ( 1.33_f*rknudn  + 0.71_f ) / ( rknudn  + 1._f ) &
+                    + ( 4._f*( 1._f - gstick ) ) / ( 3._f*gstick )
+
+              rlamt = ( 1.33_f*rknudnt + 0.71_f ) / ( rknudnt + 1._f ) &
+                    + ( 4._f*( 1._f - tstick ) ) / ( 3._f*tstick )
+
+              ! Diffusion coefficient and thermal conductivity modified for
+              ! free molecular limit and for particle shape.
+              diffus1 = diffus(k,igas)*cor / ( 1._f + rlam*rknudn*cor/phish )
+              thcond1 = thcond(k)*cor / ( 1._f + rlamt*rknudnt*cor/phish )
+
+              ! Save the modified thermal conductivity off so it can be used in pheat.
+              thcondnc(k,i,igroup,igas) = thcond1
+          
+              ! Reynolds' number based on particle shape <reyn_shape>
+              if( (ishape(igroup) .eq. I_SPHERE) .or. (ishape(igroup) .eq. I_FRACTAL) )then
+                reyn_shape = re(k,i,igroup)
+
+              else if( eshape(igroup) .lt. 1._f )then
+                reyn_shape = re(k,i,igroup) * ( 1._f + 2._f*eshape(igroup) )
+
+              else
+                reyn_shape = re(k,i,igroup) * PI*( 1._f+2._f*eshape(igroup) ) &
+                       / ( 2._f*( 1._f + eshape(igroup) ) )
+              endif
+
+              ! Particle Schmidt number
+              schn = rmu(k) / ( rhoa_cgs(k,igas) * diffus1 )
+
+              ! Prandtl number
+              prnum = rmu(k)*CP/thcond1
+
+              ! Ventilation factors <fv> and <ft> from Pruppacher and Klett
+              x1 = schn **(ONE/3._f) * sqrt( reyn_shape )
+              x2 = prnum**(ONE/3._f) * sqrt( reyn_shape )
+
+              if( is_grp_ice(igroup) )then
+
+                ! Ice crystals
+                if( x1 .le. 1._f )then
+                  fv = 1._f   + 0.14_f*x1**2
+                else
+                  fv = 0.86_f + 0.28_f*x1
+                endif
+
+                if( x2 .le. 1._f )then
+                  ft(k,i,igroup,igas) = 1._f   + 0.14_f*x2**2
+                else
+                  ft(k,i,igroup,igas) = 0.86_f + 0.28_f*x2
+                endif
+              else
+          
+                ! Liquid water drops
+                if( x1 .le. 1.4_f  )then
+                  fv = 1._f   + 0.108_f*x1**2
+                else
+                  fv = 0.78_f + 0.308_f*x1
+                endif
+
+                if( x2 .le. 1.4_f )then
+                  ft(k,i,igroup,igas) = 1._f   + 0.108_f*x2**2
+                else
+                  ft(k,i,igroup,igas) = 0.78_f + 0.308_f*x2
+                endif
+              endif
+		!write(*,*) 'IZ', k, i, igroup, igas, ft(k,i,igroup,igas)
+
+              ! Growth kernel for particle without radiation or heat conduction at
+              ! radius lower boundary [g cm^3 / erg / s]
+              gro(k,i,igroup,igas) = 4._f*PI*br &
+                            * diffus1*fv*gwtmol_dif(igas) &
+                            / ( BK*t(k)*AVG )
+      
+              ! Coefficient for conduction term in growth kernel [s/g]
+              gro1(k,i,igroup,igas) = gwtmol_dif(igas)*rlh**2 &
+                    / ( RGAS*t(k)**2*ft(k,i,igroup,igas)*thcond1 ) &
+                    / ( 4._f*PI*br )
+  
+              ! Coefficient for radiation term in growth kernel [g/erg]
+              ! (note: no radial dependence).
+              if( i .eq. 1 )then
+                gro2(k,igroup,igas) = 1._f / rlh
+              endif
+ 
+            enddo   ! i=1,NBIN
+          enddo    ! k=1,NZ
+        endif     ! igas ne 0
+      enddo
+    else
       do k = 1, NZ
 
         ! Latent heat of condensing gas 
@@ -233,10 +508,10 @@ subroutine setupgkern(carma, cstate, rc)
           thcond1 = thcond(k)*cor / ( 1._f + rlamt*rknudnt*cor/phish )
 
           ! Save the modified thermal conductivity off so it can be used in pheat.
-          thcondnc(k,i,igroup) = thcond1
+          thcondnc(k,i,igroup,igas) = thcond1
           
           ! Reynolds' number based on particle shape <reyn_shape>
-          if( ishape(igroup) .eq. I_SPHERE )then
+          if( (ishape(igroup) .eq. I_SPHERE) .or. (ishape(igroup) .eq. I_FRACTAL)  )then
             reyn_shape = re(k,i,igroup)
 
           else if( eshape(igroup) .lt. 1._f )then
@@ -244,7 +519,7 @@ subroutine setupgkern(carma, cstate, rc)
 
           else
             reyn_shape = re(k,i,igroup) * PI*( 1._f+2._f*eshape(igroup) ) &
-                       / ( 2._f*( 1._f + eshape(igroup) ) )
+                   / ( 2._f*( 1._f + eshape(igroup) ) )
           endif
 
           ! Particle Schmidt number
@@ -267,9 +542,9 @@ subroutine setupgkern(carma, cstate, rc)
             endif
 
             if( x2 .le. 1._f )then
-              ft(k,i,igroup) = 1._f   + 0.14_f*x2**2
+              ft(k,i,igroup,igas) = 1._f   + 0.14_f*x2**2
             else
-              ft(k,i,igroup) = 0.86_f + 0.28_f*x2
+              ft(k,i,igroup,igas) = 0.86_f + 0.28_f*x2
             endif
           else
           
@@ -281,32 +556,33 @@ subroutine setupgkern(carma, cstate, rc)
             endif
 
             if( x2 .le. 1.4_f )then
-              ft(k,i,igroup) = 1._f   + 0.108_f*x2**2
+              ft(k,i,igroup,igas) = 1._f   + 0.108_f*x2**2
             else
-              ft(k,i,igroup) = 0.78_f + 0.308_f*x2
+              ft(k,i,igroup,igas) = 0.78_f + 0.308_f*x2
             endif
           endif
+		!write(*,*) 'IZ', k, i, igroup, igas, ft(k,i,igroup,igas)
 
-          ! Growth kernel for particle without radiation or heat conduction at
-          ! radius lower boundary [g cm^3 / erg / s]
-          gro(k,i,igroup) = 4._f*PI*br &
-                        * diffus1*fv*gwtmol(igas) &
+              ! Growth kernel for particle without radiation or heat conduction at
+              ! radius lower boundary [g cm^3 / erg / s]
+          gro(k,i,igroup,igas) = 4._f*PI*br &
+                        * diffus1*fv*gwtmol_dif(igas) &
                         / ( BK*t(k)*AVG )
-  
+      
           ! Coefficient for conduction term in growth kernel [s/g]
-          gro1(k,i,igroup) = gwtmol(igas)*rlh**2 &
-                / ( RGAS*t(k)**2*ft(k,i,igroup)*thcond1 ) &
+          gro1(k,i,igroup,igas) = gwtmol_dif(igas)*rlh**2 &
+                / ( RGAS*t(k)**2*ft(k,i,igroup,igas)*thcond1 ) &
                 / ( 4._f*PI*br )
   
           ! Coefficient for radiation term in growth kernel [g/erg]
           ! (note: no radial dependence).
           if( i .eq. 1 )then
-            gro2(k,igroup) = 1._f / rlh
+            gro2(k,igroup,igas) = 1._f / rlh
           endif
  
         enddo   ! i=1,NBIN
       enddo    ! k=1,NZ
-    endif     ! igas ne 0
+    endif
   enddo       ! igroup=1,NGROUP
 
   ! Return to caller with time-independent particle growth 

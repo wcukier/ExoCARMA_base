@@ -19,6 +19,7 @@ module carma_enums_mod
   !  boundary conditions (ixxxbnd_pc)
   integer, public, parameter :: I_FIXED_CONC = 1    !! Fixed Concentration
   integer, public, parameter :: I_FLUX_SPEC  = 2    !! Flux Specification
+  integer, public, parameter :: I_ZERO_CGRAD = 3   !! Zero Concentration Gradient 
   
   !  Define values of flag used for particle element
   !  type specification (itype).
@@ -44,6 +45,8 @@ module carma_enums_mod
   integer, public, parameter :: I_ICEMELT           = 2048  !! Ice Melting
   integer, public, parameter :: I_HETNUC            = 4096  !! Heterogeneous Nucleation
   integer, public, parameter :: I_HOMNUC            = 8192  !! Binary homogeneous gas-to-particle nucleation
+  integer, public, parameter :: I_HOMGEN            = 128   !! General classic homogeneous nucleation
+  integer, public, parameter :: I_HETGEN            = 64    !! General classic heterogeneous nucleation
   
   !  Define values of flag used for collection process (icollec)
   integer, public, parameter :: I_COLLEC_CONST = 1   !! Constant Collection Efficiency
@@ -57,8 +60,9 @@ module carma_enums_mod
   !  Define values of flag used for particle shape (ishape)
   integer, public, parameter :: I_SPHERE   = 1   !! spherical
   integer, public, parameter :: I_HEXAGON  = 2   !! hexagonal prisms or plates
-  integer, public, parameter :: I_CYLINDER = 3   !! circular disks, cylinders, or spheroids
-  
+  integer, public, parameter :: I_CYLINDER = 3   !! circular disks, cylinders, or spheroids  
+  integer, public, parameter :: I_FRACTAL = 4   !! circular disks, cylinders, or spheroids
+
   !  Define values of flag used for particle swelling parameterization (irhswell)
   integer, public, parameter :: I_NO_SWELLING  = 0   !! No swelling
   integer, public, parameter :: I_FITZGERALD   = 1   !! Fitzgerald
@@ -87,6 +91,20 @@ module carma_enums_mod
   integer, public, parameter :: I_VAPRTN_H2O_MURPHY2005    = 2   !! H2O, Murphy & Koop [2005]
   integer, public, parameter :: I_VAPRTN_H2O_GOFF1946      = 3   !! H2O, Goff & Gratch [1946], used in CAM
   integer, public, parameter :: I_VAPRTN_H2SO4_AYERS1980   = 4   !! H2SO4, Ayers [1980] & Kumala [1990]
+  integer, public, parameter :: I_VAPRTN_S8_FERREIRA2011   = 5   !! S8, Ferreira & Lobo [2011] 
+  integer, public, parameter :: I_VAPRTN_S2_LYONS2008      = 6  !! S2, Lyons [2008]
+  integer, public, parameter :: I_VAPRTN_KCL_MORLEY2012    = 7  !! KCl, Morley et al. [2012]
+  integer, public, parameter :: I_VAPRTN_ZNS_MORLEY2012    = 8  !! ZnS, Morley et al. [2012]
+  integer, public, parameter :: I_VAPRTN_NA2S_MORLEY2012      = 9  !! Na2S, Morley et al. [2012]
+  integer, public, parameter :: I_VAPRTN_MNS_MORLEY2012       = 10  !! MnS, Morley et al. [2012]
+  integer, public, parameter :: I_VAPRTN_CR_MORLEY2012        = 11  !! Cr, Morley et al. [2012]
+  integer, public, parameter :: I_VAPRTN_FE_VISSCHER2010      = 12  !! Fe, Visscher et al. [2010]
+  integer, public, parameter :: I_VAPRTN_MG2SIO4_VISSCHER2010 = 13  !! Mg2SiO4, Visscher et al. [2010]
+  integer, public, parameter :: I_VAPRTN_S8_ZAHNLE2016     = 14   !! S8, Zahnle et al. [2016] 
+  integer, public, parameter :: I_VAPRTN_TIO2_LODDERS1999     = 15   !! TiO2, Lodders [1999] 
+  integer, public, parameter :: I_VAPRTN_TIO2_HELLING2001     = 16   !! TiO2, Helling et al. [2001] 
+  integer, public, parameter :: I_VAPRTN_AL2O3_WAKEFORD2017     = 17   !! Al2O3, Wakeford et al. [2017] 
+  integer, public, parameter :: I_VAPRTN_CO_WYLIE1958     = 18   !! CO, Wylie thesis [1958] 
 
   ! Routines to calculate fall velocities
   integer, public, parameter :: I_FALLRTN_STD              = 1   !! Standard CARMA 2.3 routine (spherical only)
@@ -101,6 +119,18 @@ module carma_enums_mod
   integer, public, parameter :: I_GCOMP_H2O             = 1   !! Water Vapor
   integer, public, parameter :: I_GCOMP_H2SO4           = 2   !! Sulphuric Acid
   integer, public, parameter :: I_GCOMP_SO2             = 3   !! Sulfer Dioxide
+  integer, public, parameter :: I_GCOMP_S8              = 4   !! Sulfur 8
+  integer, public, parameter :: I_GCOMP_S2              = 5   !! Sulfur 2
+  integer, public, parameter :: I_GCOMP_KCL             = 6   !! KCl
+  integer, public, parameter :: I_GCOMP_ZNS             = 7   !! ZnS
+  integer, public, parameter :: I_GCOMP_NA2S            = 8   !! Na2S
+  integer, public, parameter :: I_GCOMP_MNS             = 9   !! MnS
+  integer, public, parameter :: I_GCOMP_CR              = 10  !! Cr
+  integer, public, parameter :: I_GCOMP_FE              = 11  !! Fe
+  integer, public, parameter :: I_GCOMP_MG2SIO4         = 12  !! Mg2SiO4
+  integer, public, parameter :: I_GCOMP_TIO2            = 13 !! TiO2
+  integer, public, parameter :: I_GCOMP_AL2O3           = 14 !! Al2O3
+  integer, public, parameter :: I_GCOMP_CO              = 15 !! CO
   
   ! How is the CARMA group represented in the parent model
   integer, public, parameter :: I_CNSTTYPE_PROGNOSTIC   = 1   !! Prognostic, advected constituent for each bin
@@ -123,6 +153,7 @@ module carma_enums_mod
   !       I_CART    cartesian
   !       I_SIG     sigma
   !       I_HYBRID  hybrid
+  !       I_LOGP    Log-Pressure !DPOW EDIT!
   !
   !    Possible values for igridh:
   !       I_CART   cartesian
@@ -137,5 +168,8 @@ module carma_enums_mod
   integer, public, parameter   :: I_PS         = 5   !! Polar Sterographic
   integer, public, parameter   :: I_ME         = 6   !! Mercator
   integer, public, parameter   :: I_HYBRID     = 7   !! Hybrid
+  integer, public, parameter   :: I_LOGP   	   = 8   !! Log-Pressure
+  
+  
 end module
 

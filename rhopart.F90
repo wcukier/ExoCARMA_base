@@ -22,6 +22,8 @@ subroutine rhopart(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -47,7 +49,7 @@ subroutine rhopart(carma, cstate, rc)
   real(kind=f)    :: gc_cgs
 
   1 format(/,'rhopart::WARNING - core mass > total mass, truncating : iz=',i4,',igroup=',&
-              i4,',ibin=',i4,',total mass=',e9.3,',core mass=',e9.3,',using rhop=',f9.4)
+              i4,',ibin=',i4,',total mass=',e10.3,',core mass=',e10.3,',using rhop=',f9.4)
 
   ! Calculate average particle mass density for each group
   do igroup = 1,NGROUP
@@ -60,7 +62,11 @@ subroutine rhopart(carma, cstate, rc)
       ! If there are no cores, than the density of the particle is just the density
       ! of the element.
       if (ncore(igroup) < 1) then
-        rhop(iz,:,igroup) = rhoelem(:,iepart)
+        if (ishape(igroup) .eq. I_FRACTAL) then
+          rhop(iz,:,igroup) = rhoelem(:,iepart)*(r(:,igroup)/rm(:,igroup))**(fdim(:,igroup) - 3._f)
+        else
+          rhop(iz,:,igroup) = rhoelem(:,iepart)
+	endif  
       
       ! Otherwise, the density changes depending on the amount of core and volatile
       ! components.
@@ -107,7 +113,8 @@ subroutine rhopart(carma, cstate, rc)
               pc(iz,ibin,iepart) = mcore(ibin) / rmass(ibin,igroup)
             else 
               rhop(iz,ibin,igroup) = (rmass(ibin,igroup) * pc(iz,ibin,iepart)) / &
-              ((pc(iz,ibin,iepart)*rmass(ibin,igroup) - mcore(ibin))/rhoelem(ibin,iepart) + vcore(ibin))
+              ((pc(iz,ibin,iepart)*rmass(ibin,igroup) - &
+		mcore(ibin))/rhoelem(ibin,iepart) + vcore(ibin))
             end if
           end if
         enddo

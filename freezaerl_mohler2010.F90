@@ -21,6 +21,8 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -127,7 +129,8 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
                   if (ssi > sifreeze) then
   
                     ! Mohler et al. 2010? nucleation rate parameterization
-                    rlogj = 97.973292_f - 154.67476_f * (ssi + 1._f) - 0.84952712_f * t(iz) + 1.0049467_f * (ssi + 1._f) * t(iz)
+                    rlogj = 97.973292_f - 154.67476_f * (ssi + 1._f) - &
+			0.84952712_f * t(iz) + 1.0049467_f * (ssi + 1._f) * t(iz)
                     rjj   = 10._f**(rlogj)              ! [cm-3 s-1]
 
                     ! NOTE: The weight percent can become negative from this parameterization,
@@ -166,7 +169,8 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
                     endif
   
                     ! NOTE: Limit the rate for stability.
-                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) + min(1e20_f, rjj * volrat * vol(ibin,igroup))                 ! [s-1]
+                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) &
+			+ min(1e20_f, rjj * volrat * vol(ibin,igroup))                 ! [s-1]
                  endif   ! ssi > sifreeze .and. target droplets not evaporating
                 enddo    ! ibin = 1,NBIN
               endif     ! inucproc(iepart,ienucto) .eq. I_DROPACT

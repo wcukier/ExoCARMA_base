@@ -13,6 +13,8 @@ subroutine growp(carma, cstate, iz, ibin, ielem, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -44,6 +46,8 @@ subroutine growp(carma, cstate, iz, ibin, ielem, rc)
       growpe(ibin,ielem) = pc(iz,ibin-1,ielem) * growlg(ibin-1,igroup) 
     endif
   endif
+
+  !write(*,*) iz, ibin, ielem, igroup, growlg(ibin-1,igroup) 
 
   ! Return to caller with growth production terms evaluated.
   return

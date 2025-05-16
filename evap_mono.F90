@@ -16,6 +16,8 @@ subroutine evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -41,6 +43,7 @@ subroutine evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   real(kind=f)                         :: factor
   real(kind=f)                         :: fracmass
 
+ ! write(*,*) 'mono', iz, ibin, ig, iavg, ieto, igto
 
   ! Define option to conserve mass or number when a choice must be made
   ! during monodisperse total evaporation beyond CN grid -- should be done in setupaer()

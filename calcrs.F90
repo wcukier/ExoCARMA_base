@@ -20,7 +20,8 @@ subroutine calcrs(carma, cstate, ustar, tmp, radi, cc, vfall, rs, landidx, rc)
   use carma_enums_mod
   use carma_types_mod
   use carma_mod
-  use carma_constants_mod, only: BK, PI, GRAV
+  use carma_constants_mod, only: BK, PI
+!  use carma_planet_mod, only: GRAV
 !-----------------------------------------------------------------------
     implicit none
 !-----------------------------------------------------------------------
@@ -54,7 +55,7 @@ subroutine calcrs(carma, cstate, ustar, tmp, radi, cc, vfall, rs, landidx, rc)
   real(kind=f)            :: lam                    ! exponent in the eb dependence on sc, 2/3 in [Seinfeld and Pandis, 1998], 1/2 in [Lewis and Schwartz, 2004]
   integer                 :: ibot
   
-  if (igridv .eq. I_CART) then
+  if ((igridv .eq. I_CART) .or. (igridv .eq. I_LOGP)) then
     ibot = 1
   else
     ibot = NZ
@@ -79,7 +80,7 @@ subroutine calcrs(carma, cstate, ustar, tmp, radi, cc, vfall, rs, landidx, rc)
   ebrn = sc**(-lam)
  
   ! ** Impaction 
-  st = vfall * ustar**2 / (GRAV * eta)   ! [-]
+  st = vfall * ustar**2 / (grav(ibot) * eta)   ! [-]
    
   ! [Slinn, 1982]   
   ! eimp = 10. ** (-3._f/st)     

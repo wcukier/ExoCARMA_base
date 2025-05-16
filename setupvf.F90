@@ -16,6 +16,8 @@ subroutine setupvf(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -52,8 +54,8 @@ subroutine setupvf(carma, cstate, rc)
         call setupvf_heymsfield2010(carma, cstate, igroup, rc)
       
       case default
-        if (do_print) write(LUNOPRT,*) "setupvf:: ERROR - Unknown fall velocity routine  (", ifallrtn(igroup), &
-          ") for group (", igroup, ")."
+        if (do_print) write(LUNOPRT,*) "setupvf:: ERROR - Unknown fall velocity routine  (", &
+	ifallrtn(igroup), ") for group (", igroup, ")."
         rc = -1
         return
     end select
@@ -93,23 +95,40 @@ subroutine setupvf(carma, cstate, rc)
   ! Set upper boundary before averaging
   vf(NZP1,:,:) = vf(NZ,:,:)
 
-  if (NZ .gt. 1) then
-    vf(NZ,:,:) = sqrt(vf(nzm1,:,:) * vf(NZ,:,:))
+!  if (NZ .gt. 1) then
+!    vf(NZ,:,:) = sqrt(vf(nzm1,:,:) * vf(NZ,:,:))
 
-    if (NZ .gt. 2) then
-      do iz = NZ-1, 2, -1
-        vf(iz,:,:) = sqrt(vf(iz-1,:,:) * vf(iz,:,:))
-      enddo
-    endif
-  endif
+!    if (NZ .gt. 2) then
+!      do iz = NZ-1, 2, -1
+!        vf(iz,:,:) = sqrt(vf(iz-1,:,:) * vf(iz,:,:))
+!      enddo
+!    endif
+!  endif
   
+
+  if (NZ .gt. 1) then                                         !PETER
+    vf(NZ,:,:) = (vf(nzm1,:,:) + vf(NZ,:,:)) / 2._f           !PETER
+
+    if (NZ .gt. 2) then                                       !PETER 
+      do iz = NZ-1, 2, -1                                     !PETER 
+        vf(iz,:,:) = (vf(iz-1,:,:) + vf(iz,:,:)) / 2._f       !PETER
+      enddo                                                   !PETER
+    endif                                                     !PETER
+  endif                                                       !PETER
+
   ! Scale cartesian fallspeeds to the appropriate vertical coordinate system.
   ! Non--cartesion coordinates are assumed to be positive downward, but
   ! vertical velocities in this model are always assumed to be positive upward. 
-  if( igridv .ne. I_CART )then
+  if(( igridv .ne. I_CART ) .and. ( igridv .ne. I_LOGP )) then
     do igroup=1,NGROUP
       do ibin=1,NBIN
         vf(:,ibin,igroup) = -vf(:,ibin,igroup) / zmetl(:)
+      enddo
+    enddo
+  elseif (igridv .eq. I_LOGP) then
+  	do igroup=1,NGROUP
+      do ibin=1,NBIN
+        vf(:,ibin,igroup) = vf(:,ibin,igroup) / zmetl(:)
       enddo
     enddo
   endif

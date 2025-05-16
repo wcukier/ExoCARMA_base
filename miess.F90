@@ -203,7 +203,8 @@ SUBROUTINE miess(carma,RO,RFR,RFI,THETD,JX,QEXT,QSCAT,QBS,CTBRQS,R,RE2,TMAG2,WVN
       CSTHT(J)  =  0.0_f
       SI2THT(J) =  1.0_f
     else 
-      if (do_print) write(LUNOPRT, '(a,i3)') "miess:: The value of the scattering angle is greater than 90.0 Degrees. It is .", THETD(J)
+      if (do_print) write(LUNOPRT, '(a,i3)') "miess:: The value of the scattering", &
+	" angle is greater than 90.0 Degrees. It is .", THETD(J)
       rc = RC_ERROR
       return
     end if

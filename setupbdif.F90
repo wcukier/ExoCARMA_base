@@ -24,6 +24,8 @@ subroutine setupbdif(carma, cstate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -53,7 +55,8 @@ subroutine setupbdif(carma, cstate, rc)
       do iz = 1, NZ
 
         ! Vertical brownian diffusion coefficient
-        dkz(iz,ibin,igroup) = (BK*t(iz)*bpm(iz,ibin,igroup)) / (6._f*PI*rmu(iz)*r_wet(iz,ibin,igroup))
+        dkz(iz,ibin,igroup) = (BK*t(iz)*bpm(iz,ibin,igroup)) &
+	/ (6._f*PI*rmu(iz)*r_wet(iz,ibin,igroup))
 
       enddo
     enddo
@@ -104,7 +107,7 @@ subroutine setupbdif(carma, cstate, rc)
   if( igridv .ne. I_CART )then
     do igroup=1,NGROUP
       do ibin=1,NBIN
-        dkz(:,ibin,igroup) = dkz(:,ibin,igroup) / (zmetl(:)**2)
+        dkz(:,ibin,igroup) = dkz(:,ibin,igroup) / (zmetl(:)**2._f)
       enddo
     enddo
   endif

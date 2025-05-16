@@ -3,15 +3,18 @@
 #include "carma_globaer.h"
 
 !!  Calculates particle production rates due to nucleation <rhompe>:
-!!  binary homogeneous nucleation of sulfuric acid and water only
-!!  Numerical method follows Zhao & Turco, JAS, V.26, No.5, 1995.
+!!  classic homogeneous nucleation. Numerical method follows Pandis,
+!!  2005, Fundamentals of Atmospheric Modeling, 2nd Edition, Cambridge
+!!  University Press, pp. 486.
 !!
-!!  @author Mike Mills
-!!  @version Jul-2001
+!!  @author Peter Gao
+!!  @version Apr-2016
 subroutine sulfnuc(carma,cstate, iz, rc) 
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -43,6 +46,8 @@ subroutine sulfnuc(carma,cstate, iz, rc)
       ! sulfates.
       call sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
       if (rc /= RC_OK) return
+
+	!write(*,*) iz, nucrate
                     
       ! Do further calculations only if nucleation occurred
       if (nucrate .gt. 0._f) then

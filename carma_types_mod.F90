@@ -16,6 +16,8 @@
 module carma_types_mod
   use carma_precision_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
 
   !! The CARMAELEMENT data type represents one of the components of a cloud or aerosol particle.
   !!
@@ -85,6 +87,7 @@ module carma_types_mod
     character(len=CARMA_NAME_LEN)               :: f_name
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
     real(kind=f)                                :: f_wtmol
+    real(kind=f)                                :: f_wtmol_dif
     integer                                     :: f_ivaprtn
     integer                                     :: f_icomposition
     real(kind=f)                                :: f_dgc_threshold
@@ -191,6 +194,8 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_rmassup    ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rup        ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rlow       ! (NBIN)
+    real(kind=f), allocatable, dimension(:)     :: f_rm         ! (NBIN)
+    real(kind=f), allocatable, dimension(:)     :: f_fdim       ! (NBIN)
     complex(kind=f), allocatable, dimension(:)  :: f_refidx     ! (NWAVE)
     real(kind=f), allocatable, dimension(:,:)   :: f_qext       ! (NWAVE,NBIN)
     real(kind=f), allocatable, dimension(:,:)   :: f_ssa        ! (NWAVE,NBIN)
@@ -281,12 +286,15 @@ module carma_types_mod
     ! model output.
     !
     integer :: f_LUNOPRT   ! output print file
+    integer :: f_lundiag   ! output diagnostic file
 
     ! Model startup control variables
     !
-    !   do_print  .t. if print output is desired
+    !   do_print      .t. if print output is desired
+    !   do_printdiag  .t. if diagnostic output is desired
     !
     logical            :: f_do_print
+    logical            :: f_do_printdiag
     
     
     ! Configuration Objects
@@ -382,6 +390,18 @@ module carma_types_mod
     real(kind=f)                                  :: f_conmax
     integer                                       :: f_igash2o
     integer                                       :: f_igash2so4
+    integer                                       :: f_igass8
+    integer                                       :: f_igass2
+    integer                                       :: f_igaskcl
+    integer                                       :: f_igaszns
+    integer                                       :: f_igasna2s
+    integer                                       :: f_igasmns
+    integer                                       :: f_igascr
+    integer                                       :: f_igasfe
+    integer                                       :: f_igasmg2sio4
+    integer                                       :: f_igastio2
+    integer                                       :: f_igasal2o3
+    integer                                       :: f_igasco
     integer                                       :: f_igasso2
     integer                                       :: f_maxsubsteps 
     integer                                       :: f_minsubsteps 
@@ -391,7 +411,10 @@ module carma_types_mod
     integer                                       :: f_icollec
     integer                                       :: f_itbnd_pc
     integer                                       :: f_ibbnd_pc
-    integer, allocatable, dimension(:)            :: f_inucgas      ! NGROUP
+    integer                                       :: f_itbnd_gc
+    integer                                       :: f_ibbnd_gc
+    integer, allocatable, dimension(:,:)          :: f_inucgas      ! (NELEM, NELEM)
+    real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NGAS,NGROUP)
     integer, allocatable, dimension(:)            :: f_igrowgas     ! NELEM
     integer, allocatable, dimension(:)            :: f_nnuc2elem    ! NELEM
     integer, allocatable, dimension(:)            :: f_ievp2elem    ! NELEM
@@ -610,6 +633,7 @@ module carma_types_mod
     ! Primary model state variables
     !
     !  pc          Particle concentration [/x_units/y_units/z_units]  {initaer}
+    !  pc_psolve   PETER: Particle concentration after calling psolve.F90 [/x_units/y_units/z_units]  {psolve}
     !  pcd         Detrained particle concentration [/x_units/y_units/z_units]  {initaer}
     !  pc_surf     Particles on surface [/cm2]                        {initaer}
     !  sedimentationflux     Particles sedimented to surface [/cm2/s]                        {initaer}
@@ -618,6 +642,7 @@ module carma_types_mod
     !  rhcrit      Relative humidity for onset of liquid clouds [fraction]
     !
     real(kind=f), allocatable, dimension(:,:,:) :: f_pc         ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:) :: f_pc_psolve  ! (NZ,NBIN,NELEM)	!PETER
     real(kind=f), allocatable, dimension(:,:,:) :: f_pcd        ! (NZ,NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)   :: f_pc_surf    ! (NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)   :: f_sedimentationflux    ! (NBIN,NELEM)
@@ -639,8 +664,11 @@ module carma_types_mod
     !   dpc_sed     Change in particle concentration due to sedimentation
     !   coaglg      Total particle loss rate due to coagulation for group
     !   coagpe      Particle production due to coagulation 
+    !   coagprod    Particle production rate due to coagulation for diagnostic		!PETER
+    !   coagloss    Particle loss rate due to coagulation for diagnostic		!PETER
     !   rnuclg      Total particle loss rate due to nucleation for group
     !   rnucpe      Particle production due to nucleation 
+    !   rnucpeup    Particle production due to nucleation (before calling downgxfer.F90)  !PETER
     !   rhompe      Particle production due to homogeneous nucleation 
     !   pc_nucl     Particles produced due to nucleation (for the whole step, not just the substep)
     !   growlg      Total particle loss rate due to growth for group
@@ -657,8 +685,21 @@ module carma_types_mod
     !   rlheat      Latent heating rate (per step) [deg_K/s]   
     !   ftoppart    Downward particle flux across top boundary of model
     !   fbotpart    Upward flux particle across bottom boundary of model
+    !   vertupin_sum  Flux into a vertical level for some bin of some element from above	!PETER
+    !   vertupout_sum Flux out of a vertical level for some bin of some element from above		!PETER
+    !   vertdnin_sum  Flux into a vertical level for some bin of some element from below		!PETER
+    !   vertdnout_sum Flux out of a vertical level for some bin of some element from below		!PETER
     !   pc_topbnd   Particle concentration assumed just above the top boundary
     !   pc_botbnd   Particle concentration assumed just below the bottom boundary
+    !   ftopgas     Downward gas flux across top boundary of model                          !PETER
+    !   fbotgas     Upward gas flux across bottom boundary of model                         !PETER
+    !   gc_topbnd   Gas concentration assumed just above the top boundary                   !PETER
+    !   gc_botbnd   Gas concentration assumed just below the bottom boundary                !PETER
+    !   gflux       Upward flux of gas (g/cm^2/s) 			                    !PETER
+    !   pflux       Upward flux of particles (/cm^2/s) 			                    !PETER
+    !   winds	    Upward wind speed (cm/s)						!PETER
+    !   vertpartflux net column-integrated particle flux (/cm^2/s) 			                    !PETER
+    !   vertgasflux  net column-integrated gas flux     (g/cm^2/s) 			                    !PETER
     !   cmf         Core mass fraction in a droplet 
     !   totevap     .true. if droplets are totally evaporating to CN
     !   too_small   .true. if cores are smaller than smallest CN
@@ -674,24 +715,52 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:)     :: f_pconmax    ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coaglg     ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagpe     ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_coagprod   ! (NZ,NBIN,NELEM)		!PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_coagloss   ! (NZ,NBIN,NELEM)		!PETER
     real(kind=f), allocatable, dimension(:,:,:)   :: f_rnuclg     ! (NBIN,NGROUP,NGROUP)
     real(kind=f), allocatable, dimension(:,:)     :: f_rnucpe     ! (NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:)     :: f_rnucpeup   ! (NBIN,NELEM)           !PETER
     real(kind=f), allocatable, dimension(:,:)     :: f_rhompe     ! (NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_pc_nucl    ! (NZ,NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)     :: f_growpe     ! (NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)     :: f_evappe     ! (NBIN,NELEM)
+    real(kind=f)                                  :: f_vertpartflux			!PETER
+    real(kind=f)                                  :: f_vertgasflux			!PETER
     real(kind=f)                                  :: f_coreavg
     real(kind=f)                                  :: f_coresig
     real(kind=f)                                  :: f_evdrop
     real(kind=f), allocatable, dimension(:)       :: f_evcore     ! (NELEM)
     real(kind=f), allocatable, dimension(:,:)     :: f_growlg     ! (NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:)     :: f_evaplg     ! (NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:)       :: f_redugrow    ! (NGAS)
     real(kind=f), allocatable, dimension(:)       :: f_gasprod    ! (NGAS)
+    real(kind=f), allocatable, dimension(:,:)       :: f_gasprod_tot    ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_rnucpeup_tot    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_rhompe_tot    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_growpe_tot    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_rnuclg_tot    ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_growlg_tot    ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_rnucpe_tot    ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_evaplg_tot    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_evappe_tot    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)       :: f_phochemprod    ! (NZ,NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:)       :: f_phochemprod_gas    ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:)       :: f_rlheat     ! (NZ)
     real(kind=f), allocatable, dimension(:,:)     :: f_ftoppart   ! (NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)     :: f_fbotpart   ! (NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_vertupin_sum ! (NZ,NBIN,NELEM)		!PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_vertupout_sum! (NZ,NBIN,NELEM)		!PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_vertdnin_sum ! (NZ,NBIN,NELEM)		!PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_vertdnout_sum! (NZ,NBIN,NELEM)		!PETER
     real(kind=f), allocatable, dimension(:,:)     :: f_pc_topbnd  ! (NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:)     :: f_pc_botbnd  ! (NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:)       :: f_ftopgas    ! (NGAS)                  !PETER
+    real(kind=f), allocatable, dimension(:)       :: f_fbotgas    ! (NGAS)                  !PETER
+    real(kind=f), allocatable, dimension(:)       :: f_gc_topbnd  ! (NGAS)                  !PETER
+    real(kind=f), allocatable, dimension(:)       :: f_gc_botbnd  ! (NGAS)                  !PETER
+    real(kind=f), allocatable, dimension(:,:)     :: f_gflux      ! (NZP1,NGAS)               !PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_pflux      ! (NZP1,NBIN,NELEM)         !PETER
+    real(kind=f), allocatable, dimension(:)   	  :: f_winds      ! (NZ)	 	        !PETER
     real(kind=f), allocatable, dimension(:,:)     :: f_cmf        ! (NBIN,NGROUP)
     logical, allocatable, dimension(:,:)          :: f_totevap    ! (NBIN,NGROUP)
     logical                                       :: f_too_small
@@ -711,12 +780,14 @@ module carma_types_mod
     !   vf        Fall velocities at layer endge                       {setupvfall}
     !   re        Reynolds' number based on <vfall>                     {setupvfall}
     !   dkz       Vert Brownian diffusion coef at layer boundary [z_units^2/s] {setupbdif}
+    !   ekz       Vert Eddy diffusion coef at layer boundary [z_units^2/s] {setupedif}             !PETER
     !   vd        Particle dry deposition velocity  [z_units/s]         {setupvdry}
     !
     real(kind=f), allocatable, dimension(:,:,:)     :: f_bpm        ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)     :: f_vf         ! (NZP1,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)     :: f_re         ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)     :: f_dkz        ! (NZP1,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:)         :: f_ekz        ! (NZP1)                       !PETER
     real(kind=f), allocatable, dimension(:,:)       :: f_vd         ! (NBIN,NGROUP)
     
     ! Atmospheric Structure
@@ -740,10 +811,14 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_pl         ! (NZP1)
     real(kind=f), allocatable, dimension(:)     :: f_rmu        ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_thcond     ! (NZ)
-    real(kind=f), allocatable, dimension(:,:,:) :: f_thcondnc   ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_thcondnc   ! (NZ,NBIN,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:)     :: f_told       ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_relhum     ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_wtpct      ! (NZ)
+    real(kind=f), allocatable, dimension(:)     :: f_wtmol_air      ! (NZ)
+    real(kind=f), allocatable, dimension(:)     :: f_grav      ! (NZ)
+    real(kind=f)                                :: f_met    
+    real(kind=f)                                :: f_t0    
 
     ! Condensational growth parameters
     !
@@ -785,15 +860,23 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)      :: f_surfctia   ! (NZ)
     real(kind=f), allocatable, dimension(:,:)    :: f_akelvin    ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_akelvini   ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:,:)    :: f_gro2       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_surfacetens   ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:)    :: f_desorption   ! (NGAS)
+    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:)    :: f_gro2       ! (NZ,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsatlold ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsatiold ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:)  :: f_scrit      ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_scrit      ! (NZ,NBIN,NGROUP,NGAS)
+!    real(kind=f), allocatable, dimension(:,:)  :: f_agnuc      ! (NZ,NGAS)
+!    real(kind=f), allocatable, dimension(:,:)  :: f_deltafg      ! (NZ,NGAS)
+!    real(kind=f), allocatable, dimension(:,:)  :: f_fluxmol      ! (NZ,NGAS)
+!    real(kind=f), allocatable, dimension(:,:)  :: f_surfcond      ! (NZ,NGAS)
+!    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_curvfact      ! (NZ,NBIN,NGROUP,NGAS)
+!    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_zv      ! (NZ,NBIN,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_radint     ! (NZ,NWAVE)
     real(kind=f), allocatable, dimension(:)      :: f_partheat   ! (NZ)
     real(kind=f), allocatable, dimension(:,:,:)  :: f_dtpart     ! (NZ,NBIN,NGROUP)

@@ -86,6 +86,8 @@ module carma_mod
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
 
   ! CARMA explicitly declares all variables. 
@@ -122,7 +124,7 @@ contains
   !!  @version Feb-2009 
   !!  @author  Chuck Bardeen 
   subroutine CARMA_Create(carma, NBIN, NELEM, NGROUP, NSOLUTE, NGAS, NWAVE, rc, &
-    LUNOPRT, wave, dwave, do_wave_emit)
+    LUNOPRT, wave, dwave, do_wave_emit, lundiag)
 
     type(carma_type), intent(out)      :: carma     !! the carma object
     integer, intent(in)                :: NBIN      !! number of radius bins per group
@@ -136,6 +138,7 @@ contains
     real(kind=f), intent(in), optional :: wave(NWAVE)  !! wavelength centers (cm)
     real(kind=f), intent(in), optional :: dwave(NWAVE) !! wavelength width (cm)
     logical, intent(in), optional      :: do_wave_emit(NWAVE) !! do emission in band?
+    integer, intent(in), optional      :: lundiag   !! PETER: logical unit number for diagnostic output
 
     ! Local Varaibles      
     integer                            :: ier
@@ -149,6 +152,11 @@ contains
       carma%f_LUNOPRT = LUNOPRT
       carma%f_do_print = .TRUE.
     end if
+
+    if (present(lundiag)) then      ! PETER
+      carma%f_lundiag = lundiag     ! PETER
+      carma%f_do_printdiag = .TRUE.  ! PETER
+    end if                           ! PETER
     
     ! Save the defintion of the number of comonents involved in the microphysics.
     carma%f_NGROUP  = NGROUP 
@@ -163,7 +171,7 @@ contains
     allocate( &
       carma%f_group(NGROUP), &
       carma%f_icoag(NGROUP, NGROUP), &
-      carma%f_inucgas(NGROUP), &
+      carma%f_inucgas(NELEM,NELEM), &
       stat=ier) 
     if(ier /= 0) then
       if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_Create: ERROR allocating groups, NGROUP=", &
@@ -174,7 +182,7 @@ contains
     
     ! Initialize
     carma%f_icoag(:, :)  = 0
-    carma%f_inucgas(:)   = 0    
+    carma%f_inucgas(:,:)   = 0    
     
     ! Allocate tables for the elements.
     allocate( &
@@ -287,6 +295,7 @@ contains
     if (NGAS > 0) then
       allocate( &
         carma%f_gas(NGAS), &
+        carma%f_mucos(NGAS,NGROUP), &
         stat=ier) 
       if(ier /= 0) then
         if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_Create: ERROR allocating gases, NGAS=", &
@@ -294,8 +303,8 @@ contains
         rc = RC_ERROR
         return
       endif
+      carma%f_mucos(:,:) = 0._f
     end if
-    
     
     ! Allocate tables for optical properties, if any are needed.
     if (NWAVE > 0) then
@@ -335,7 +344,8 @@ contains
   subroutine CARMA_Initialize(carma, rc, do_cnst_rlh, do_coag, do_detrain, do_fixedinit, &
       do_grow, do_incloud, do_explised, do_print_init, do_substep, do_thermo, do_vdiff, &
       do_vtran, do_drydep, vf_const, minsubsteps, maxsubsteps, maxretries, conmax, &
-      do_pheat, do_pheatatm, dt_threshold, cstick, gsticki, gstickl, tstick)
+      do_pheat, do_pheatatm, dt_threshold, cstick, gsticki, gstickl, tstick, itbnd_pc, &
+      ibbnd_pc, itbnd_gc, ibbnd_gc)
     type(carma_type), intent(inout)     :: carma         !! the carma object
     integer, intent(out)                :: rc            !! return code, negative indicates failure
     logical, intent(in), optional       :: do_cnst_rlh   !! use constant values for latent heats (instead of varying with temperature)?
@@ -363,6 +373,10 @@ contains
     real(kind=f), intent(in), optional  :: gsticki       !! accommodation coefficient - growth (ice), default = 0.93
     real(kind=f), intent(in), optional  :: gstickl       !! accommodation coefficient - growth (liquid), default = 1.0
     real(kind=f), intent(in), optional  :: tstick        !! accommodation coefficient - temperature, default = 1.0
+    integer, intent(in), optional       :: itbnd_pc      !! top boundary condition for particles
+    integer, intent(in), optional       :: ibbnd_pc      !! bottom boundary condition for particles
+    integer, intent(in), optional       :: itbnd_gc      !! top boundary condition for gases
+    integer, intent(in), optional       :: ibbnd_gc      !! bottom boundary condition for gases
     
     ! Assume success.
     rc = RC_OK
@@ -388,6 +402,10 @@ contains
     carma%f_gsticki       = 0.93_f
     carma%f_gstickl       = 1._f
     carma%f_tstick        = 1._f
+    carma%f_itbnd_pc      = I_FIXED_CONC
+    carma%f_ibbnd_pc      = I_FIXED_CONC       
+    carma%f_itbnd_gc      = I_FIXED_CONC      
+    carma%f_ibbnd_gc      = I_FIXED_CONC
 
     ! Store off any control flag values that have been supplied.
     if (present(do_cnst_rlh))   carma%f_do_cnst_rlh   = do_cnst_rlh
@@ -437,7 +455,8 @@ contains
     ! information, then perform that now. This will mostly be checking the configuration
     ! and setting up any tables based upon the configuration.
     if (carma%f_do_vtran .or. carma%f_do_coag)  then
-      call CARMA_InitializeVertical(carma, rc, vf_const)
+      call CARMA_InitializeVertical(carma, rc, vf_const, &
+        itbnd_pc, ibbnd_pc, itbnd_gc, ibbnd_gc)
       if (rc < 0) return
     end if
     
@@ -762,14 +781,15 @@ contains
       endif
 
       ! Check that <isolute> is consistent with <inucgas>.
-      igas = carma%f_inucgas( carma%f_element(ielem)%f_igroup )
-      if( igas .ne. 0 )then
-        if( carma%f_element(ielem)%f_itype .eq. I_COREMASS .and. carma%f_element(ielem)%f_isolute .eq. 0 )then
-          if (carma%f_do_print) write(carma%f_LUNOPRT,*) 'CARMA_InitializeGrowth::ERROR - inucgas ne 0 but isolute eq 0'
-          rc = RC_ERROR
-          return
-        endif
-      endif
+     ! igas = carma%f_inucgas( carma%f_element(ielem)%f_igroup )
+     ! if( igas .ne. 0 )then
+	!write(*,*) ielem, igas, carma%f_element(ielem)%f_isolute 
+        !if( carma%f_element(ielem)%f_itype .eq. I_COREMASS .and. carma%f_element(ielem)%f_isolute .eq. 0 )then
+        !  if (carma%f_do_print) write(carma%f_LUNOPRT,*) 'CARMA_InitializeGrowth::ERROR - inucgas ne 0 but isolute eq 0'
+         ! rc = RC_ERROR
+         ! return
+        !endif
+      !endif
     enddo
 
     do ielem = 1, carma%f_NELEM
@@ -818,11 +838,14 @@ contains
     if (carma%f_do_print_init) then
     
       ! Report some initialization values!
-      write(carma%f_LUNOPRT,5)
-      write(carma%f_LUNOPRT,1) 'inucgas  ',(carma%f_inucgas(i),i=1,carma%f_NGROUP)
-      write(carma%f_LUNOPRT,1) 'inuc2elem',(carma%f_inuc2elem(1,i),i=1,carma%f_NELEM)
-      write(carma%f_LUNOPRT,1) 'ievp2elem',(carma%f_ievp2elem(i),i=1,carma%f_NELEM)
-      write(carma%f_LUNOPRT,1) 'isolute ',(carma%f_element(i)%f_isolute,i=1,carma%f_NELEM)
+
+      do ielem = 1,carma%f_NELEM
+        write(carma%f_LUNOPRT,5)
+        write(carma%f_LUNOPRT,1) 'inucgas  ',(carma%f_inucgas(ielem,i),i=1,carma%f_NELEM)
+        write(carma%f_LUNOPRT,1) 'inuc2elem',(carma%f_inuc2elem(i,ielem),i=1,carma%f_nnuc2elem(ielem))
+        write(carma%f_LUNOPRT,1) 'ievp2elem',(carma%f_ievp2elem(i),i=1,carma%f_NELEM)
+       ! write(carma%f_LUNOPRT,1) 'isolute ',(carma%f_element(i)%f_isolute,i=1,carma%f_NELEM)
+      enddo
     
       do isol = 1,carma%f_NSOLUTE
         write(carma%f_LUNOPRT,2) 'solute number   ',isol
@@ -837,6 +860,18 @@ contains
     ! that it occurs after H2O. This is necessary for supersaturation calculations.
     carma%f_igash2o   = 0
     carma%f_igash2so4 = 0
+    carma%f_igass8 = 0
+    carma%f_igass2 = 0
+    carma%f_igaskcl = 0
+    carma%f_igaszns = 0
+    carma%f_igasna2s = 0
+    carma%f_igasmns = 0
+    carma%f_igascr = 0
+    carma%f_igasfe = 0
+    carma%f_igasmg2sio4 = 0
+    carma%f_igastio2   = 0
+    carma%f_igasal2o3   = 0
+    carma%f_igasco   = 0
     carma%f_igasso2   = 0
 
     do igas = 1, carma%f_NGAS
@@ -844,6 +879,30 @@ contains
         carma%f_igash2o = igas
       else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_H2SO4) then
         carma%f_igash2so4 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_S8) then
+        carma%f_igass8 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_S2) then
+        carma%f_igass2 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_KCL) then
+        carma%f_igaskcl = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_ZNS) then
+        carma%f_igaszns = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_NA2S) then
+        carma%f_igasna2s = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_MNS) then
+        carma%f_igasmns = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_CR) then
+        carma%f_igascr = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_FE) then
+        carma%f_igasfe = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_MG2SIO4) then
+        carma%f_igasmg2sio4 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_TIO2) then
+        carma%f_igastio2 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_AL2O3) then
+        carma%f_igasal2o3 = igas
+      else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_CO) then
+        carma%f_igasco = igas
       else if (carma%f_gas(igas)%f_icomposition == I_GCOMP_SO2) then
         carma%f_igasso2 = igas
       end if
@@ -909,7 +968,9 @@ contains
                      rc)
 
             if (rc < RC_OK) then
-              if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_InitializeOptics:: Mie failed for (band, wavelength, group, bin)", iwave, carma%f_wave(iwave), igroup, ibin
+              if (carma%f_do_print) write(carma%f_LUNOPRT, *) &
+		"CARMA_InitializeOptics:: Mie failed for (band, wavelength, group, bin)", &
+		iwave, carma%f_wave(iwave), igroup, ibin
               return
             end if
 
@@ -945,10 +1006,15 @@ contains
   !!
   !! @author  Chuck Bardeen
   !! @version May-2009
-  subroutine CARMA_InitializeVertical(carma, rc, vf_const)
+  subroutine CARMA_InitializeVertical(carma, rc, vf_const, &
+        itbnd_pc, ibbnd_pc, itbnd_gc, ibbnd_gc)
     type(carma_type), intent(inout)    :: carma
     integer, intent(out)               :: rc
     real(kind=f), intent(in), optional :: vf_const
+    integer, intent(in), optional       :: itbnd_pc
+    integer, intent(in), optional       :: ibbnd_pc
+    integer, intent(in), optional       :: itbnd_gc
+    integer, intent(in), optional       :: ibbnd_gc
         
     ! Assume success.
     rc = RC_OK
@@ -965,9 +1031,18 @@ contains
     end if
     
     ! Specify the boundary conditions for vertical transport.
-    carma%f_itbnd_pc  = I_FIXED_CONC
-    carma%f_ibbnd_pc  = I_FIXED_CONC
-    
+
+    if (present(itbnd_pc))   carma%f_itbnd_pc   = itbnd_pc
+    if (present(ibbnd_pc))   carma%f_ibbnd_pc   = ibbnd_pc
+    if (present(itbnd_gc))   carma%f_itbnd_gc   = itbnd_gc
+    if (present(ibbnd_gc))   carma%f_ibbnd_gc   = ibbnd_gc
+
+    !carma%f_ibbnd_pc  = I_FIXED_CONC       
+    !carma%f_ibbnd_pc  = I_ZERO_CGRAD
+    !carma%f_itbnd_pc  = I_FLUX_SPEC       
+    !carma%f_ibbnd_gc  = I_FIXED_CONC      
+    !carma%f_itbnd_gc  = I_FLUX_SPEC
+
     return
   end subroutine CARMA_InitializeVertical         
 
@@ -1095,6 +1170,7 @@ contains
       if (allocated(carma%f_gas)) then
         deallocate( &
           carma%f_gas, &
+          carma%f_mucos, &
           stat=ier) 
         if(ier /= 0) then
           if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_Destroy: ERROR deallocating gases, status=", ier
@@ -1184,7 +1260,8 @@ contains
       if (present(grav_e_coll0)) then
         carma%f_grav_e_coll0 = grav_e_coll0
       else
-        if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddCoagulation:: ERROR - A constant gravitational collection was requests, but grav_e_coll0 was not provided."
+        if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddCoagulation::", &
+	" ERROR - A constant gravitational collection was requests, but grav_e_coll0 was not provided."
         rc = RC_ERROR
         return
       end if
@@ -1291,7 +1368,7 @@ contains
   !! @see CARMA_AddElement
   !! @see CARMA_AddGas
   subroutine CARMA_AddNucleation(carma, ielemfrom, ielemto, inucproc, &
-      rlh_nuc, rc, igas, ievp2elem)
+      rlh_nuc, rc, igas, ievp2elem, mucos)
       
     use carmaelement_mod, only         : CARMAELEMENT_Get
     
@@ -1303,6 +1380,7 @@ contains
     integer, intent(out)               :: rc          !! return code, negative indicated failure
     integer, optional, intent(in)      :: igas        !! the gas
     integer, optional, intent(in)      :: ievp2elem   !! the element created upon evaporation
+    real(kind=f), optional, intent(in)      :: mucos   !! cosine of the contact angle for heterogeneous (general) nucleation
     
     integer                            :: igroup      !! group for source element
     
@@ -1347,19 +1425,21 @@ contains
     
     ! If aerosol freezing is selected, but no I_AF_xxx sub-method is selected, then indicate an error.
     if (inucproc == I_AERFREEZE) then
-      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddNucleation:: ERROR - I_AERFREEZE was specified without an I_AF_xxx value."
+      if (carma%f_do_print) write(carma%f_LUNOPRT, *) &
+	"CARMA_AddNucleation:: ERROR - I_AERFREEZE was specified without an I_AF_xxx value."
       return
     end if
-    
     
     ! Array <inucgas> maps a particle group to its associated gas for nucleation:
     ! Nucleation from group <igroup> is associated with gas <inucgas(igroup)>
     ! Set to zero if particles are not subject to nucleation.
     if (present(igas)) then
+      carma%f_inucgas(ielemfrom,ielemto) = igas
       call CARMAELEMENT_Get(carma, ielemfrom, rc, igroup=igroup)
-      
       if (rc >= RC_OK) then
-        carma%f_inucgas(igroup) = igas
+        !carma%f_inucgas(igroup) = igas
+        if (present(mucos)) carma%f_mucos(igas,igroup) = mucos
+	 ! write(*,*) igas,igroup,carma%f_mucos(igas,igroup), mucos
       end if
     end if
 

@@ -18,6 +18,8 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -52,6 +54,7 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   real(kind=f)                         :: weightl
   real(kind=f)                         :: weights
 
+ ! write(*,*) 'poly', iz, ibin, ig, iavg, ieto, igto
 
   ! Treat total evaporation from a polydisperse core mass distribution:
   ! assume a log-normal CN size distribution and conserve number and mass as

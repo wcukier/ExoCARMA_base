@@ -18,6 +18,8 @@ module carmagroup_mod
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
 
   ! CARMA explicitly declares all variables. 
@@ -36,13 +38,13 @@ contains
 
   subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, ishape, eshape, is_ice, &
       rc, irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
-      cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, imiertn, is_sulfate, dpc_threshold)
+      cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold)
     type(carma_type), intent(inout)             :: carma               !! the carma object
     integer, intent(in)                         :: igroup              !! the group index
     character(*), intent(in)                    :: name                !! the group name, maximum of 255 characters
     real(kind=f), intent(in)                    :: rmin                !! the minimum radius, can be specified [cm]
     real(kind=f), intent(in)                    :: rmrat               !! the volume ratio between bins
-    integer, intent(in)                         :: ishape              !! the type of the particle shape [I_SPHERE | I_HEXAGON | I_CYLINDER]
+    integer, intent(in)                         :: ishape              !! the type of the particle shape [I_SPHERE | I_HEXAGON | I_CYLINDER | I_FRACTAL]
     real(kind=f), intent(in)                    :: eshape              !! the aspect ratio of the particle shape (length/diameter)
     logical, intent(in)                         :: is_ice              !! is this an ice particle?
     integer, intent(out)                        :: rc                  !! return code, negative indicates failure
@@ -61,6 +63,8 @@ contains
     integer, optional, intent(in)               :: ifallrtn            !! fall velocity routine [I_FALLRTN_STD | I_FALLRTN_STD_SHAPE | I_FALLRTN_HEYMSFIELD2010 | I_FALLRTN_ACKERMAN_DROP | I_FALLRTN_ACKERMAN_ICE]
     logical, optional, intent(in)               :: is_cloud            !! is this a cloud particle?
     real(kind=f), optional, intent(in)          :: rmassmin            !! the minimum mass, when used overrides rmin[g]
+    real(kind=f), optional, intent(in)          :: rm(carma%f_NBIN)    !! monomer radius for fractal particles [cm]
+    real(kind=f), optional, intent(in)          :: fdim(carma%f_NBIN)  !! fractal dimension for fractal particles
     integer, optional, intent(in)               :: imiertn             !! mie routine [I_MIERTN_TOON1981 | I_MIERTN_BOHREN1983]
     logical, optional, intent(in)               :: is_sulfate          !! is this a sulfate particle?
     real(kind=f), optional, intent(in)          :: dpc_threshold       !! convergence criteria for particle concentration [fraction]
@@ -88,6 +92,8 @@ contains
       carma%f_group(igroup)%f_rmassup(carma%f_NBIN), &
       carma%f_group(igroup)%f_rup(carma%f_NBIN), &
       carma%f_group(igroup)%f_rlow(carma%f_NBIN), &
+      carma%f_group(igroup)%f_rm(carma%f_NBIN), &
+      carma%f_group(igroup)%f_fdim(carma%f_NBIN), &
       carma%f_group(igroup)%f_icorelem(carma%f_NELEM), &
       carma%f_group(igroup)%f_arat(carma%f_NBIN), &
       carma%f_group(igroup)%f_rrat(carma%f_NBIN), &
@@ -136,6 +142,10 @@ contains
       carma%f_group(igroup)%f_asym(:,:) = 0._f
     end if
     
+    if (ishape .eq. I_FRACTAL) then
+      carma%f_group(igroup)%f_rm(:)       = 0._f
+      carma%f_group(igroup)%f_fdim(:)     = 2._f
+    endif
 
     ! Save off the settings.
     carma%f_group(igroup)%f_name        = name
@@ -175,6 +185,8 @@ contains
     if (present(ifallrtn))   carma%f_group(igroup)%f_ifallrtn     = ifallrtn
     if (present(is_cloud))   carma%f_group(igroup)%f_is_cloud     = is_cloud
     if (present(rmassmin))   carma%f_group(igroup)%f_rmassmin     = rmassmin
+    if (present(rm))         carma%f_group(igroup)%f_rm(:)        = rm(:)
+    if (present(fdim))       carma%f_group(igroup)%f_fdim(:)      = fdim(:)
     if (present(imiertn))    carma%f_group(igroup)%f_imiertn      = imiertn
     if (present(is_sulfate)) carma%f_group(igroup)%f_is_sulfate   = is_sulfate
     if (present(dpc_threshold)) carma%f_group(igroup)%f_dpc_threshold = dpc_threshold
@@ -263,6 +275,18 @@ contains
         carma%f_group(igroup)%f_icorelem, &
         carma%f_group(igroup)%f_arat, &
         carma%f_group(igroup)%f_rrat, &
+        stat=ier) 
+      if(ier /= 0) then
+        if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMAGROUP_Destroy: ERROR deallocating, status=", ier
+        rc = RC_ERROR
+        return
+      endif
+    endif
+
+    if (allocated(carma%f_group(igroup)%f_rm)) then
+      deallocate( &
+        carma%f_group(igroup)%f_rm, &
+        carma%f_group(igroup)%f_fdim, &
         stat=ier) 
       if(ier /= 0) then
         if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMAGROUP_Destroy: ERROR deallocating, status=", ier

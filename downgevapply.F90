@@ -13,6 +13,8 @@ subroutine downgevapply(carma, cstate, iz, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -35,16 +37,22 @@ subroutine downgevapply(carma, cstate, iz, rc)
   do ielem = 1,NELEM
     do ibin = 1,NBIN
 
+	!write(*,*) 'downevapply before', iz, ibin, ielem, pc(iz,ibin,ielem), evappe(ibin,ielem), rnucpe(ibin,ielem)
+
       pc(iz,ibin,ielem) = pc(iz,ibin,ielem) + &
                          dtime * ( evappe(ibin,ielem) + &
                                    rnucpe(ibin,ielem) )
+
+	!write(*,*) 'downevapply after', iz, ibin, ielem, pc(iz,ibin,ielem)
+
+     ! write(*,*) 'downevapply', iz, ibin, ielem, evappe(ibin,ielem), rnucpe(ibin,ielem) 
+      !write(*,*) 'downevapply', iz, ibin, ielem, evappe(ibin,ielem)
                                    
       ! Prevent particle concentrations from dropping below SMALL_PC
       call smallconc(carma, cstate, iz, ibin, ielem, rc)
 
     enddo
   enddo
-
 
   ! Return to caller with evaporation and down-grid element transfer
   ! production terms applied to particle concentrations.

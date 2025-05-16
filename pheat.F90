@@ -31,6 +31,8 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -82,13 +84,26 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   real(kind=f)                         :: ddtp                    ! change in particle temperature in last iteration (K)
   real(kind=f)                         :: plkint                  ! planck intensity
   
+ ! if (igroup .eq. 3) then
+  !write(*,*) "start pheat", iz, igroup, iepart, ibin, igas
+ ! endif 
+
   ! <akas> is combined kelvin (curvature) and solute factors.
   !
   ! Ignore solute factor for ice particles.
-  if( is_grp_ice(igroup) )then
+  if( is_grp_ice(igroup)  )then
     expon = akelvini(iz,igas) / rup_wet(iz,ibin,igroup)
+    expon = max(-POWMAX, expon)
+    akas  = exp( expon )
+  elseif (igas .eq. igash2so4) then
+    argsol = wtpct(iz)/100._f/WTMOL_H2SO4 / &
+      ( (1._f - wtpct(iz)/100._f)/WTMOL_H2O + wtpct(iz)/100._f/WTMOL_H2SO4 )
+    expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup)
+    expon = max(-POWMAX, expon)
+    akas  = exp( expon ) * argsol
   else
-  
+   ! write(*,*) "other!"
+
     argsol = 0._f
   
     ! Consider growth of average particle at radius <rup(ibin,igroup)>.
@@ -96,56 +111,67 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
     ! Treat solute effect first: <asol> is solute factor.
     !
     ! Only need to treat solute effect if <nelemg(igroup)> > 1
-    if( nelemg(igroup) .gt. 1 )then
+!    if( nelemg(igroup) .gt. 1 )then
   
       ! <condm> is mass concentration of condensed gas <igas> in particle.
       ! <nother> is number of other elements in group having mass.
       ! <otherm> are mass concentrations of other elements in particle group.
       ! <othermtot> is total mass concentrations of other elements in particle.
-      nother = 0
-      othermtot = 0._f
+!      nother = 0
+!      othermtot = 0._f
+!      ieother(:) = 0._f
   
       ! <ieoth_rel> is relative element number of other element in group.
-      do ieoth_rel  = 2,nelemg(igroup)       
+!      do ieoth_rel  = 2,nelemg(igroup)  
   
         ! <ieoth_abs> is absolute element number of other element.
-        ieoth_abs = iepart + ieoth_rel - 1    
+!        ieoth_abs = iepart + ieoth_rel - 1    
   
-        if( itype(ieoth_abs) .eq. I_COREMASS )then
-          nother = nother + 1
-          ieother(nother) = ieoth_abs
-          otherm(nother) = pc(iz,ibin,ieoth_abs)
-          othermtot = othermtot + otherm(nother)
-        endif
+!        if( itype(ieoth_abs) .eq. I_COREMASS )then
+!          nother = nother + 1
+!          ieother(nother) = ieoth_abs
+!          otherm(nother) = pc(iz,ibin,ieoth_abs)
+!          othermtot = othermtot + otherm(nother)
+!        endif
   
-      enddo
+!      enddo
   
-      condm = rmass(ibin,igroup) * pc(iz,ibin,iepart) - othermtot
+!      condm = rmass(ibin,igroup) * pc(iz,ibin,iepart) - othermtot
   
-      if( condm .le. 0._f )then
+!      if( condm .le. 0._f )then
   
         ! Zero mass for the condensate -- <asol> is a small value << 1
-        argsol = 1e6_f     
+!        argsol = 1e6_f     
   
-      else
+!      else
   
         ! Sum over masses of other elements in group for argument of solute factor.
-        do jother = 1,nother
-          isol = isolelem(ieother(jother))
+!        do jother = 1,nother
+         
+!          isol = isolelem(ieother(jother))
           
           ! Some elements aren't soluble, so skip them.
-          if(isol .ge. 0 ) argsol = argsol + sol_ions(isol)*otherm(jother)/solwtmol(isol)
-        enddo 
-       
-        argsol = argsol*gwtmol(igas)/condm
-      endif 
-    endif    ! nelemg(igroup) > 1
+!          if (isol .gt. 0 ) then
+!	    argsol = argsol + sol_ions(isol)*otherm(jother)/solwtmol(isol)
+!          endif
+!        enddo 
+
+!        argsol = argsol*gwtmol(igas)/condm
+
+!      endif 
+!    endif    ! nelemg(igroup) > 1
 
     expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup) - argsol 
+	!write(*,*) 'pheat', iz, igas, akelvin(iz,igas), expon
+    expon = max(-POWMAX, expon)
+    akas  = exp( expon )
   endif
   
-  expon = max(-POWMAX, expon)
-  akas  = exp( expon )
+
+
+   ! if ((igroup .eq. 3) .and. (igas .eq. 2)) then
+   !	write(*,*) igroup, igas, ibin, iz, akas, expon, argsol 
+   ! endif
 
   ! Trick for removing haze droplets from droplet bins:
   ! allows haze droplets to exist under supersaturated conditions;
@@ -154,9 +180,10 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
 !              (supsatl(iz,igas) .lt. 0._f) ) akas = 1._f
 
   ! <dmdt> is growth rate in mass space [g/s].
-  g0 =  gro(iz,ibin+1,igroup)
-  g1 = gro1(iz,ibin+1,igroup)
-  g2 = gro2(iz,igroup)
+  g0 =  gro(iz,ibin+1,igroup,igas)
+  g1 = gro1(iz,ibin+1,igroup,igas)
+  g2 = gro2(iz,igroup,igas)
+  !write(*,*) iz,ibin,igroup,igas,g0,g1,g2
 
   if( is_grp_ice(igroup) )then
     ss   = supsati(iz,igas)
@@ -173,9 +200,21 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   ! NOTE: If no optical properties, then can't do the particle heating calculation.
   if ((.not. do_pheat) .or. (.not. do_mie(igroup))) then
 
+    !if (igroup .eq. 3) then
+    !write(*,*) igroup, "checkpoint 7"
+    !endif
+
     ! Ignore the qrad term.
     dmdt = pvap * ( ss + 1._f - akas ) * g0 / ( 1._f + g0 * g1 * pvap )
-                     
+!    if (igas .eq. igass8) then
+!	write(*,*) iz, pvap
+ !   endif
+         
+  !  if ((igroup .eq. 3) .and. (igas .eq. 2)) then
+    !	write(*,*) 'pheat', igroup, igas, ibin, iz, pvap, ss, akas, g0, g1
+  !  endif
+
+                
   else
   
     ! Latent heat of condensing gas 
@@ -252,8 +291,9 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
           plkint = 0._f
         end if
 
-        qrad = qrad + 4.0_f * PI * (1._f - ssa(iwvl,ibin+1,igroup)) * qext(iwvl,ibin+1,igroup) * PI * (rlow_wet(iz,ibin+1,igroup) ** 2) * arat(ibin+1,igroup) * &
-             (radint(iz,iwvl) - plkint) * dwave(iwvl)
+        qrad = qrad + 4.0_f * PI * (1._f - ssa(iwvl,ibin+1,igroup)) * qext(iwvl,ibin+1,igroup) &
+		* PI * (rlow_wet(iz,ibin+1,igroup) ** 2) * arat(ibin+1,igroup) * &
+             	(radint(iz,iwvl) - plkint) * dwave(iwvl)
       end do
       
       ! Save of the Qrad association with the ambient air temperature.
@@ -269,10 +309,12 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
       ! energy being absorbed.
       if ((dmdt * dtime) .le. (- rmass(ibin+1, igroup))) then
         dtp = ((rlh * (- rmass(ibin+1, igroup) / dtime)) + qrad) / &
-               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup) * ft(iz,ibin+1,igroup))
+               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup,igas) &
+		* ft(iz,ibin+1,igroup,igas))
       else
         dtp = ((rlh * dmdt) + qrad) / &
-               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup) * ft(iz,ibin+1,igroup))
+               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup,igas) &
+		* ft(iz,ibin+1,igroup,igas))
       end if
 
       tp = t(iz) + dtp
@@ -323,11 +365,17 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
 !        phprod = phprod + (qrad - qrad0) * pc(iz,ibin+1,iepart) / CP / rhoa(iz)
 
         ! Now add in the heating from thermal conduction.
-        phprod = phprod + 4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup) * &
-                 ft(iz,ibin+1,igroup) * dtp * pc(iz,ibin+1,iepart) / (CP * rhoa(iz))
+        phprod = phprod + 4._f * PI * rlow_wet(iz,ibin+1,igroup) * &
+		thcondnc(iz,ibin+1,igroup,igas) * &
+                ft(iz,ibin+1,igroup,igas) * dtp * pc(iz,ibin+1,iepart) &
+		/ (CP * rhoa(iz))
       end if
     end if
   end if
+
+ ! if (igroup .eq. 3) then
+ ! write(*,*) igroup, "end pheat"
+ ! endif
 
   !  Return to caller with particle loss rates for growth and evaporation
   !  evaluated.

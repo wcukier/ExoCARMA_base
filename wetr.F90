@@ -20,6 +20,8 @@ contains
     use carma_precision_mod
     use carma_enums_mod
     use carma_constants_mod
+    use carma_planet_mod
+    use carma_condensate_mod
     use carma_types_mod
     use carmastate_mod
     use carma_mod
@@ -135,8 +137,8 @@ contains
             alphaComp = 1.54_f
           
           case default
-            if (do_print) write(LUNOPRT,*) "wetr:: ERROR - Unknown composition type  (", irhswcomp(igroup), &
-              ") for Fitzgerald."
+            if (do_print) write(LUNOPRT,*) "wetr:: ERROR - Unknown composition type  (", &
+		irhswcomp(igroup), ") for Fitzgerald."
             rc = RC_ERROR
             return
         end select
@@ -186,8 +188,8 @@ contains
             c4 = -1.424_f
                   
           case default
-            if (do_print) write(LUNOPRT,*) "wetr:: ERROR - Unknown composition type  (", irhswcomp(igroup), &
-              ") for Gerber."
+            if (do_print) write(LUNOPRT,*) "wetr:: ERROR - Unknown composition type  (", &
+		 irhswcomp(igroup), ") for Gerber."
             rc = RC_ERROR
             return
         end select

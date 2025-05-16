@@ -29,6 +29,8 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -44,15 +46,17 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
   integer                 :: i, k, ilast
   real(kind=f)            :: x, y
   real(kind=f)            :: rhoa_cgs, vg, rmfp, rkn, expon
-  real(kind=f)            :: f1, f2, f3, ex, exx, exy, xcc, xa, bxx, r_shape, rfix, b0, bb1, bb2, bb3, z
+  real(kind=f)            :: f1, f2, f3, ex, exx, exy, xcc, xa, bxx, r_shape, rfix, b0, bb1, bb2, bb3, z, re_keepsign
+  real(kind=f)            :: omega, beta, kappa, psi
 
   !  Define formats
   1 format('setupvfall::ERROR - ishape != 1, no fall velocity algorithm')
 
+  omega = 1._f
 
   ! First evaluate factors that depend upon particle shape (used in correction
   ! factor <bpm> below).  
-  if (ishape(j) .eq. I_SPHERE) then
+  if ((ishape(j) .eq. I_SPHERE) .or. (ishape(j) .eq. I_FRACTAL)) then ! For now assume fractal also behave like spheres for ventilation factors
 
     ! Spheres
     f1 = 1.0_f
@@ -80,8 +84,10 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
     ! so we use prolate spheroids.  This is from Fuchs' book.
     exx = eshape(j)**2 - 1._f
     exy = sqrt(exx)
-    xcc = 1.333_f * exx / ((2._f * eshape(j)**2 - 1._f) * log(eshape(j) + exy) / exy-eshape(j))
-    xa  = 2.666_f * exx / ((2._f * eshape(j)**2 - 3._f) * log(eshape(j) + exy) / exy+eshape(j))
+    xcc = 1.333_f * exx / ((2._f * eshape(j)**2 - 1._f) * &
+	log(eshape(j) + exy) / exy-eshape(j))
+    xa  = 2.666_f * exx / ((2._f * eshape(j)**2 - 3._f) * &
+	log(eshape(j) + exy) / exy+eshape(j))
 !      f1  = eshape(j)**(-ONE/3._f) * (xcc + 2._f*xa) / 3._f
     f1  = eshape(j)**(-2._f/3._f) * (xcc + 2._f*xa) / 3._f
 
@@ -104,7 +110,7 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
     rhoa_cgs = rhoa(k) / (xmet(k)*ymet(k)*zmet(k))
 
     ! <vg> is mean thermal velocity of air molecules [cm/s]
-    vg = sqrt(8._f / PI * R_AIR * t(k))
+    vg = sqrt(8._f / PI * RGAS/wtmol_air(k) * t(k))
 
     ! <rmfp> is mean free path of air molecules [cm]
     rmfp = 2._f * rmu(k) / (rhoa_cgs * vg)
@@ -115,6 +121,14 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
       ! <r_shape> is radius of particle used to calculate <re>.
       if (ishape(j) .eq. I_SPHERE) then
         r_shape = r_wet(k,i,j)
+      else if (ishape(j) .eq. I_FRACTAL) then
+        !r_shape = r_wet(k,i,j)
+        psi = (r_wet(k,i,j)/rm(i,j))**(fdim(i,j) - 3._f)
+	kappa = 4._f * rm(i,j)**2._f / 18._f / psi / (3._f + 2._f*psi**(5._f/3._f)) * & 
+	  (3._f - 4.5_f*psi**(1._f/3._f) + 4.5_f*psi**(5._f/3._f) - 3._f*psi**2._f)
+        beta = r_wet(k,i,j)/sqrt(kappa)
+	omega = 2._f*beta**2._f*(1._f - tanh(beta)/beta)/(2._f*beta**2._f + 3._f*(1._f - tanh(beta)/beta))
+        r_shape = r_wet(k,i,j) * omega
       else if (ishape(j) .eq. I_HEXAGON) then
         r_shape = r_wet(k,i,j) * 0.8456_f * eshape(j)**(-ONE/3._f)
       else if(ishape(j) .eq. I_CYLINDER) then
@@ -126,7 +140,7 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
       endif
 
       ! <rkn> is knudsen number
-      rkn = rmfp / r_wet(k,i,j)
+      rkn = rmfp / r_shape
 
       ! <bpm> is the slip correction factor, the correction term for
       ! non-continuum effects.  Also used to calculate coagulation kernels
@@ -139,12 +153,17 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
       ! valid for Reynolds' number < 0.01
       !
       ! This is "regime 1" in Pruppacher and Klett (chap. 10, pg 416).
-      vf(k,i,j) = (2._f / 9._f) * rhop_wet(k,i,j) *(r_wet(k,i,j)**2) * GRAV * bpm(k,i,j) / (f1 * rmu(k))
+      vf(k,i,j) = (2._f / 9._f) * rhop_wet(k,i,j) * &
+!        r_shape**2 * grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f * bpm(k,i,j) / (f1 * rmu(k)) - winds(k)
+        r_shape**2 * grav(k) * bpm(k,i,j) / (f1 * rmu(k)) - winds(k)
       re(k,i,j) = 2._f * rhoa_cgs * r_shape * vf(k,i,j) / rmu(k)
+      re_keepsign = re(k,i,j) / abs(re(k,i,j))
+      re(k,i,j) = abs(re(k,i,j))   
 
 
       ! <rfix> is used in drag coefficient.
-      rfix = vol(i,j) * rhop_wet(k,i,j) * GRAV * rhoa_cgs / rmu(k)**2
+!      rfix = vol(i,j) * rhop_wet(k,i,j) * grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f * rhoa_cgs / rmu(k)**2
+      rfix = vol(i,j) * rhop_wet(k,i,j) * grav(k) * rhoa_cgs / rmu(k)**2
 
       if ((re(k,i,j) .ge. 0.01_f) .and. (re(k,i,j) .le. 300._f)) then
 
@@ -152,7 +171,7 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
         ! 
         ! NOTE: This sphere case is not the same solution used when
         ! interpolating other shape factors. This seems potentially inconsistent.
-        if (ishape(j) .eq. I_SPHERE) then
+        if ((ishape(j) .eq. I_SPHERE) .or. (ishape(j) .eq. I_FRACTAL)) then
 
           x = log(24._f * re(k,i,j) / bpm(k,i,j))
           y = -0.3318657e1_f + x * 0.992696_f - x**2 * 0.153193e-2_f - &
@@ -241,7 +260,7 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
         endif
 
         !  Adjust <vf> for non-sphericicity.
-        vf(k,i,j) = re(k,i,j) * rmu(k) / (2._f * r_shape * rhoa_cgs)
+        vf(k,i,j) = re(k,i,j) * re_keepsign * rmu(k) / (2._f * r_shape * rhoa_cgs)
 
       endif
 
@@ -254,8 +273,9 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
 !          rc = RC_ERROR
 !          return
         
-        z  = ((1.e6_f * rhoa_cgs**2) / (GRAV * rhop_wet(k,i,j) * rmu(k)**4))**(ONE/6._f)
-        b0 = (24._f * vf(k,i,j) * rmu(k)) / 100._f
+!        z  = ((1.e6_f * rhoa_cgs**2) / (grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f * rhop_wet(k,i,j) * rmu(k)**4))**(ONE/6._f)
+        z  = ((1.e6_f * rhoa_cgs**2) / (grav(k) * rhop_wet(k,i,j) * rmu(k)**4))**(ONE/6._f)
+        b0 = (24._f * abs(vf(k,i,j)) * rmu(k)) / 100._f
         x  = log(z * b0)
         y  = -5.00015_f + x * (5.23778_f   - x * (2.04914_f - x * (0.475294_f - &
                 x * (0.0542819_f - x * 0.00238449_f))))
@@ -264,7 +284,7 @@ subroutine setupvf_std_shape(carma, cstate, j, rc)
         if (y .ge.  741._f) y =  741.0_f
 
         re(k,i,j) = z * exp(y) * bpm(k,i,j)
-        vf(k,i,j) = re(k,i,j) * rmu(k) / ( 2._f * r_wet(k,i,j) * rhoa_cgs)
+        vf(k,i,j) = re(k,i,j) * re_keepsign * rmu(k) / ( 2._f * r_shape * rhoa_cgs)
 
         ! Values should not decrease with diameter, but instead should
         ! reach a limiting velocity that is independent of size (see

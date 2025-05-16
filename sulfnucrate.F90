@@ -14,6 +14,8 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -88,7 +90,7 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   real(kind=f)      :: rho_H2SO4_wet
 
  5 format(/,'microfast::WARNING - nucleation rate exceeds 5.e1: ie=', i2,', iz=',i4,',lat=', &
-              f7.2,',lon=',f7.2, ', rhompe=', e9.3)	      
+              f7.2,',lon=',f7.2, ', rhompe=', e10.3)	      
   
   !  Parameterized fit developed by Mike Mills in 1994 to the partial molal
   !  Gibbs energies (F2|o-F2) vs. weight percent H2SO4 table in Giauque et al.,
@@ -279,7 +281,8 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   if (ahom .lt. -500._f) then
     exhom=0.0_f
   else
-    exhom = exp(min(ahom, 28.0_f))
+   ! exhom = exp(min(ahom, 28.0_f))
+   exhom = exp(ahom)
   endif
 
   !   Calculate mass of critical nucleus
@@ -303,7 +306,9 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
     nucrate = 0.0_f
   else
     ! Calculate the nucleation rate [#/cm3/s], Zhao & Turco eqn 16.
-    nucrate = rpre * zeld * exhom
+    nucrate = rpre * zeld * exhom * redugrow(igash2so4)
+
+   ! write(*,*) exhom
         
     ! Scale to #/x/y/z/s
     nucrate = nucrate * zmet(iz) * xmet(iz) * ymet(iz)

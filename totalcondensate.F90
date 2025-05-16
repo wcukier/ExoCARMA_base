@@ -12,6 +12,8 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -29,6 +31,7 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
   integer                              :: igroup  ! group index
   integer                              :: icore   ! core index
   integer                              :: igas    ! gas index
+  integer                              :: igascore    ! gas index of volatile core
   integer                              :: ibin    ! bin index
   integer                              :: ielem   ! element index
   integer                              :: i
@@ -54,6 +57,9 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
 
     igas = igrowgas(ielem)      ! condensing gas
 
+    igascore = 0
+    icore = 0
+
     if ((itype(ielem) == I_VOLATILE) .and. (igas /= 0)) then
 
       do ibin = 1, NBIN
@@ -65,6 +71,11 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
           icore = icorelem(i, igroup)
           coremass = coremass + pc(iz, ibin, icore)
         end do
+
+	! Assume ncore = 1 or 0 always
+	if (icore > 0) then
+	  if ( itype(ievp2elem(icore)) == I_VOLATILE ) igascore = igrowgas(ievp2elem(icore))
+	endif
         
         volatilemass = (pc(iz, ibin, ielem) * rmass(ibin, igroup)) - coremass
         
@@ -80,6 +91,13 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
             total_liquid(igas) = total_liquid(igas) + volatilemass
           end if
         end if
+	if (igascore > 0) then
+	  if (is_grp_ice(igelem(ievp2elem(icore)))) then
+            total_ice(igascore) = total_ice(igascore) + coremass
+          else
+            total_liquid(igascore) = total_liquid(igascore) + coremass
+          end if
+	end if
       end do
     end if
   end do

@@ -54,6 +54,8 @@ subroutine setupvf_std(carma, cstate, j, rc)
   use carma_precision_mod
   use carma_enums_mod
   use carma_constants_mod
+  use carma_planet_mod
+  use carma_condensate_mod
   use carma_types_mod
   use carmastate_mod
   use carma_mod
@@ -68,7 +70,8 @@ subroutine setupvf_std(carma, cstate, j, rc)
   ! Local declarations
   integer                 :: i, k
   real(kind=f)            :: x, y, cdrag
-  real(kind=f)            :: rhoa_cgs, vg, rmfp, rkn, expon
+!  real(kind=f)            :: rhoa_cgs, vg, rmfp, rkn, expon
+  real(kind=f)            :: rhoa_cgs, vg, rmfp, rkn, expon, re_keepsign                         !PETER
                                    
   ! Define formats
   1 format(/,'Non-spherical particles specified for group ',i3, &
@@ -87,10 +90,13 @@ subroutine setupvf_std(carma, cstate, j, rc)
     rhoa_cgs = rhoa(k) / (xmet(k)*ymet(k)*zmet(k))
 
     ! <vg> is mean thermal velocity of air molecules [cm/s]
-    vg = sqrt(8._f / PI * R_AIR * t(k))
+    vg = sqrt(8._f / PI * RGAS/wtmol_air(k) * t(k))
 
     ! <rmfp> is mean free path of air molecules [cm]
     rmfp = 2._f * rmu(k) / (rhoa_cgs * vg)
+
+    !write(*,*) k, 'mfp=', rmfp, ' visc=', rmu(k)a
+    !write(*,*) k,' t=',t(k)
 
     ! Loop over particle size bins.
     do i = 1,NBIN
@@ -106,8 +112,16 @@ subroutine setupvf_std(carma, cstate, j, rc)
       bpm(k,i,j) = 1._f + (1.246_f*rkn + 0.42_f*rkn*exp(expon))
 
       ! Stokes fall velocity and Reynolds' number
-      vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 * GRAV * bpm(k,i,j) / rmu(k)
+!      vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f * bpm(k,i,j) / rmu(k)
+      vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 &
+!        * grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f * bpm(k,i,j) / rmu(k) - winds(k)    !PETER
+        * grav(k) * bpm(k,i,j) / rmu(k) - winds(k)    !PETER
+!      vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f * bpm(k,i,j) / rmu(k) - 8.0e-6_f / rhoa_cgs  !PETER
+!      vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f * bpm(k,i,j) / rmu(k) + 8.0e-6_f / rhoa_cgs  !PETER
       re(k,i,j) = 2. * rhoa_cgs * r_wet(k,i,j) * vf(k,i,j) / rmu(k)
+
+      re_keepsign = re(k,i,j) / abs(re(k,i,j))                                                !PETER
+      re(k,i,j) = abs(re(k,i,j))                                                              !PETER
 
       if (re(k,i,j) .ge. 1._f) then
 
@@ -120,16 +134,30 @@ subroutine setupvf_std(carma, cstate, j, rc)
         if (re(k,i,j) .le. 1.e3_f) then
 
           ! drag coefficient from quadratic fit y(x) when Re < 1,000
-          vf(k,i,j) = re(k,i,j) * rmu(k) / (2._f * r_wet(k,i,j) * rhoa_cgs)
-        else
+!          vf(k,i,j) = re(k,i,j) * rmu(k) / (2._f * r_wet(k,i,j) * rhoa_cgs)
+!          vf(k,i,j) = re(k,i,j) * rmu(k) / (2._f * r_wet(k,i,j) * rhoa_cgs) - 8.0e-5_f / rhoa_cgs        !PETER
+          vf(k,i,j) = re(k,i,j) * re_keepsign * rmu(k) / &
+		(2._f * r_wet(k,i,j) * rhoa_cgs)                  !PETER
+        else 
         
           ! drag coefficient = 0.45 independent of Reynolds number when Re > 1,000
           cdrag = 0.45_f 
-          vf(k,i,j) = bpm(k,i,j) * &
-                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * GRAV / &
-                      (3._f * cdrag * rhoa_cgs) )
+!          vf(k,i,j) = bpm(k,i,j) * &
+!                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f / &
+!                      (3._f * cdrag * rhoa_cgs) )
+          vf(k,i,j) = bpm(k,i,j) * &                                                    !PETER
+!                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * grav(k) * (RPLANET/(RPLANET+zc(k)))**2._f / &              !PETER
+                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * grav(k) / &              !PETER
+                      (3._f * cdrag * rhoa_cgs) ) - winds(k)                            !PETER
+!          vf(k,i,j) = bpm(k,i,j) * &                                                    !PETER
+!                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f / &            !PETER
+!                      (3._f * cdrag * rhoa_cgs) ) - 8.0e-6_f / rhoa_cgs                 !PETER
+!          vf(k,i,j) = bpm(k,i,j) * &                                                    !PETER
+!                      sqrt( 8._f * rhop_wet(k,i,j) * r_wet(k,i,j) * GRAV * (RPLANET/(RPLANET+zc(k)))**2._f / &            !PETER
+!                      (3._f * cdrag * rhoa_cgs) ) + 8.0e-6_f / rhoa_cgs                 !PETER
         endif
       endif
+!        write(*,*) 'k=',k,'r=',r_wet(k,i,j),'t=',t(k),'vfall=',vf(k,i,j)
     enddo      ! <i=1,NBIN>
   enddo      ! <k=1,NZ>
 
