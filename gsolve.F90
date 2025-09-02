@@ -81,12 +81,13 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
           !if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
           !      lat, lon, gc(iz,igas), gasprod(igas), &
           !      supsati(iz,igas), supsatl(iz,igas), t(iz)
-          if (do_print) write(LUNOPRT,4) trim(gasname(igas)), iz, &
-                lat, lon, gc(iz,igas), gasprod(igas), &
-                supsati(iz,igas), supsatl(iz,igas), t(iz)
-          if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
-                supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
+          ! if (do_print) write(LUNOPRT,4) trim(gasname(igas)), iz, &
+          !       lat, lon, gc(iz,igas), gasprod(igas), &
+          !       supsati(iz,igas), supsatl(iz,igas), t(iz)
+          ! if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
+          !       supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
           gc(iz,igas) = 1e-50_f * rhoa(iz)
+          rc=RC_WARNING
         else
           rc = RC_WARNING_RETRY
         endif

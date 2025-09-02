@@ -49,13 +49,17 @@ subroutine setupatm(carma, cstate, rescale, rplanet, rc)
  ! real(kind=f), parameter :: rmu_const = rmu_0 * (rmu_t0 + rmu_c)
   
   ! TODO WC
-  ! Values for H2 from Wikipedia! Probably have better source somewhere...                  
-  real(kind=f) :: rmu_const 
+  ! Values for H2 from Wikipedia! Probably have better source somewhere...
+  real(kind=f), parameter :: rmu_0_hc = 0.876e-4_f                     
+  real(kind=f), parameter :: rmu_t0_hc = 293.85_f                       
+  real(kind=f), parameter :: rmu_c_hc = 72._f                          
+  ! real(kind=f) :: rmu_const 
+  real(kind=f), parameter :: rmu_const = rmu_0_hc * (rmu_t0_hc + rmu_c_hc)
 
     
   integer :: ielem, ibin, i, j, ix, iy, iz, ie, ig, ip, igrp, jgrp, igroup
 
-  rmu_const = rmu_0 * (rmu_t0 + rmu_c)
+  ! rmu_const = rmu_0 * (rmu_t0 + rmu_c)
 
   ! Calculate the dry air density at each level, using the ideal gas
   ! law. This will be used to calculate zmet.
@@ -110,7 +114,6 @@ subroutine setupatm(carma, cstate, rescale, rplanet, rc)
     ! Log-Pressure
     case (I_LOGP)
       zmet(:) = t(:)/t0
-        
       
     ! Sigma
     case (I_SIG)
@@ -180,10 +183,11 @@ subroutine setupatm(carma, cstate, rescale, rplanet, rc)
   !write(*,*) 'rhoa',rhoa(:)
   !write(*,*) 'diff', (rhoa_wet(:) - rhoa(:)) / rhoa(:)
   ! Calculate the thermal properties of the atmosphere. ! TODO WC
-  rmu(:)     = rmu_const / ( t(:) + rmu_c ) * (t(:) / rmu_t0 )**1.5_f
+  rmu(:)     = rmu_const / ( t(:) + rmu_c_hc ) * (t(:) / rmu_t0_hc )**1.5_f
 !  thcond(:)  = (5.69_f + .017_f*(t(:) - T0)) * 4.186e2_f
 !  thcond(:)  = (1520._f + 7.65_f*(t(:) - T0))                  !PETER: thermal conductivity of C02 from handbook of chemistry and physics
   ! H2 atmosphere from Thermophysical Properties of Fluids section of the Handbook of Chemistry and Physics, by Eric W. Lemmon.
-  thcond(:) = 100._f * (thcond_0 + thcond_1 * t(:) + thcond_2 * t(:)**2._f) !TODO WC
+  thcond(:) = 100._f * (71.4857_f + 0.3912_f * t(:) + 3.1607e-5_f * t(:)**2._f) !TODO WC
+  ! thcond(:) = 100._f * (thcond_0 + thcond_1 * t(:) + thcond_2 * t(:)**2._f) !TODO WC
 
 end subroutine

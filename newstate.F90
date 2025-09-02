@@ -54,6 +54,7 @@ subroutine newstate(carma, cstate, rc)
   real(kind=f)                    :: fraction            ! Fraction of dT, dgc and pdc to be added in a substep.
   real(kind=f)                    :: maxrate             ! PETER
   real(kind=f)			  :: t1, t2, t3, t4, t5, t6 !PETER
+  integer                         :: warned
 
 
   1 format(/,'newstate::ERROR - Substep failed, maximum retries execeed. : iz=',i4,',isubstep=',i12, &
@@ -208,10 +209,8 @@ subroutine newstate(carma, cstate, rc)
           rnucpe_tot(iz,:,:) = 0._f             !PETER
           evappe_tot(iz,:,:) = 0._f             !PETER
         !end if				        !PETER 
-        
+        warned = 0
         do isubstep = 1,ntsubsteps
-	      !write(*,*) iz, ntsubsteps, redugrow(:)
-          
           ! If substepping, then increment the gas concentration and the temperature by
           ! an amount for one substep.
           if (do_substep) then
@@ -246,12 +245,20 @@ subroutine newstate(carma, cstate, rc)
           ! due to microphysical processes, part 2.  (faster microphysical calcs)
           ! call microfast(carma, cstate, iz, rc)
 
+
+
           !write(*,*) "before microfast"
           !write(*,*) isubstep, iz
           call microfast(carma, cstate, iz, rc, maxrate, isubstep)                                     !PETER
           if (rc < RC_OK) return
-
-          !write(*,*) "after microfast"
+          if (rc .eq. RC_WARNING) then 
+            if (warned .eq. 0) then
+              write(*,*) "WARNING: In microfast"
+              warned = 1
+            endif
+            rc = RC_OK
+          end if
+          ! write(*,*) "after microfast", nretries
                                                
   
           ! If there was a retry warning message and substepping is enabled, then retry
@@ -264,6 +271,8 @@ subroutine newstate(carma, cstate, rc)
               
               if (nretries > maxretries) then
                 if (do_print) write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries - 1._f
+                write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries - 1._f
+
                 rc = RC_ERROR
                 exit
               end if

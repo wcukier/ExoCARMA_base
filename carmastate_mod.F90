@@ -194,7 +194,6 @@ contains
     cstate%f_grav(:)  = grav(:)
     cstate%f_winds(:) = 0._f
     if (present(winds)) cstate%f_winds(:)  = winds(:)			!PETER
-    cstate%f_ekz(:)  = ekz(:)/ cstate%f_zmetl(:)**2._f  			!PETER !DPOW
     
     cstate%f_pcd(:,:,:)     = 0._f
 
@@ -238,6 +237,8 @@ contains
     ! Initialize the state of the atmosphere.
     call setupatm(carma_ptr, cstate, carma_ptr%f_do_fixedinit, rplanet, rc)
     if (rc < 0) return
+    
+    cstate%f_ekz(:)  = ekz(:)/ (cstate%f_zmetl(:)**2._f)			!PETER !DPOW
 
     ! Set the realtive humidity. If necessary, it will be calculated from
     ! the specific humidity.
@@ -458,6 +459,9 @@ contains
     ! Initialize the state of the atmosphere.
     call setupatm(carma_ptr, cstate, .false., rplanet, rc)
     if (rc < 0) return
+
+    cstate%f_ekz(:)  = ekz(:) / (cstate%f_zmetl(:))**2._f  			!PETER !DPOW
+    
 
     ! If the model uses a gas, then set the relative and
     ! specific humidities.
