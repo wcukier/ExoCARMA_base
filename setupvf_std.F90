@@ -119,19 +119,19 @@ subroutine setupvf_std(carma, cstate, j, rc)
 
       if (re(k,i,j) .ge. 1._f) then
         ! Correct drag coefficient for turbulence 
-        ! drho = rhop_wet(k,i,j)-rhoa_cgs
-        ! x = log(32._f * r_wet(k,i,j)**3._f * drho * rhoa_cgs * grav(k) / (3._f * rmu(k)**2._f ))  
-        ! b0 = -0.318657e1_f
-        ! b1 = 0.992696_f
-        ! b2 = -0.153193e-2_f
-        ! b3 = -0.987059e-3_f
-        ! b4 = -0.578878e-3_f
-        ! b5 = 0.855176e-4_f
-        ! b6 = -0.327815e-5_f
-        ! y = b0 + b1*x + b2*x**2._f + b3*x**3._f + b4*x**4._f + b5*x**5._f + b6*x**6._f
+        drho = rhop_wet(k,i,j)-rhoa_cgs
+        x = log(32._f * r_wet(k,i,j)**3._f * drho * rhoa_cgs * grav(k) / (3._f * rmu(k)**2._f ))  
+        b0 = -0.318657e1_f
+        b1 = 0.992696_f
+        b2 = -0.153193e-2_f
+        b3 = -0.987059e-3_f
+        b4 = -0.578878e-3_f
+        b5 = 0.855176e-4_f
+        b6 = -0.327815e-5_f
+        y = b0 + b1*x + b2*x**2._f + b3*x**3._f + b4*x**4._f + b5*x**5._f + b6*x**6._f
 
-        x = log(re(k,i,j) / bpm(k,i,j))
-        y = x*(0.83_f - 0.013_f*x)
+        ! x = log(re(k,i,j) / bpm(k,i,j))
+        ! y = x*(0.83_f - 0.013_f*x)
 
 
         re(k,i,j) = exp(y)
