@@ -66,8 +66,8 @@ subroutine setupgkern(carma, cstate, rc)
   real(kind=f)                   :: rlam
   real(kind=f)                   :: rlamt
   real(kind=f)                   :: rhoa_cgs(NZ, NGAS)
-  real(kind=f)                   :: freep(NZ, NGAS)
-  real(kind=f)                   :: freept(NZ, NGAS)
+  real(kind=f)                   :: freep(NZ, NGROUP)
+  real(kind=f)                   :: freept(NZ, NGROUP)
   real(kind=f)                   :: rlh
   real(kind=f)                   :: diffus1
   real(kind=f)                   :: thcond1
@@ -82,15 +82,25 @@ subroutine setupgkern(carma, cstate, rc)
   real(kind=f)                   :: rho_cond
 
 
+  ! TODO: We should do this on a group by group level
+
   ! Calculate gas properties for all of the gases. Better to do them all once, than to
   ! repeat this for multiple groups.
-  do igas = 1, NGAS
- 
+  do igroup = 1, NGROUP
+    ielem = ienconc(igroup)     ! element of particle number concentration
+    igas = igrowgas(ielem) 
+
+    if( igas .eq. 0 ) then
+      do inuc = 1,nnuc2elem(ielem)
+        igas = inucgas(ielem,inuc2elem(inuc, ielem))
+      enddo
+    endif
+
     ! Radius-independent parameters for condensing gas
     !
     ! This is <rhoa> in cgs units.
     !
-    rhoa_cgs(:, igas) = rhoa(:) / (xmet(:)*ymet(:)*zmet(:))
+    rhoa_cgs(:, igas) = rhoa(:) / (xmet(:)*ymet(:)*zmet(:)) !TODO WC this should not be a 2d array
 
     if (igas .eq. igash2o) then
         
@@ -111,13 +121,13 @@ subroutine setupgkern(carma, cstate, rc)
       ! from Hale and Plummer [J. Chem. Phys., 61, 1974].
       surfctia(:) = 141._f - 0.15_f * t(:)
 	  
-	  surfacetens(:,igas) = surfctwa(:) 
+	  surfacetens(:,igroup) = surfctwa(:) 
 	  
       ! <akelvin> is argument of exponential in kelvin curvature term.
-      akelvin(:,igas) = 2._f*gwtmol(igas)*surfctwa(:) &
+      akelvin(:,igroup) = 2._f*gwtmol(igroup)*surfctwa(:) &
                         / ( t(:)*RHO_W*RGAS )
 
-      akelvini(:,igas) = 2._f*gwtmol(igas)*surfctia(:) & 
+      akelvini(:,igroup) = 2._f*gwtmol(igroup)*surfctia(:) & 
                         / ( t(:)*RHO_W*RGAS )
                         
     ! condensing gas is H2SO4                    
@@ -126,37 +136,37 @@ subroutine setupgkern(carma, cstate, rc)
       do k = 1, NZ  
         surf_tens(k) = sulfate_surf_tens(carma, wtpct(k), t(k), rc)
         rho_part = sulfate_density(carma, wtpct(k), t(k), rc)
-        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * rho_part * RGAS)
-        surfacetens(k, igas) = surf_tens(k)
+        akelvin(k, igroup) = 2._f * gwtmol(igroup) * surf_tens(k) / (t(k) * rho_part * RGAS)
+        surfacetens(k, igroup) = surf_tens(k)
         
         ! Not doing condensation of h2So4 on ice, so just set it to the value
         ! for water vapor.
-        akelvini(k, igas) = akelvini(k, igas)
+        akelvini(k, igroup) = akelvini(k, igroup)
       end do   
     else ! WC 
       ! Calculate Kelvin curvature factor for condensate with temperature:
       do k = 1, NZ  
-        surf_tens(k) = carma%f_gas(igas)%f_surften_0 - carma%f_gas(igas)%f_surften_slope*t(k)
-        rho_cond =  carma%f_gas(igas)%f_rho_cond
-        akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * rho_cond * RGAS)
-        surfacetens(k, igas) = surf_tens(k)
+        surf_tens(k) = carma%f_group(igroup)%f_surften_0 - carma%f_group(igroup)%f_surften_slope*t(k)
+        rho_cond =  carma%f_group(igroup)%f_rho_cond
+        akelvin(k, igroup) = 2._f * gwtmol(igroup) * surf_tens(k) / (t(k) * rho_cond * RGAS)
+        surfacetens(k, igroup) = surf_tens(k)
         
-        desorption(igas) = 0.5_f
+        desorption(igas) = 0.5_f !TODO WC, allow the user to mess with this
         
         ! Not doing condensation on ice, so just set it to the value
         ! for vapor.
-        akelvini(k, igas) = akelvin(k, igas)
+        akelvini(k, igroup) = akelvin(k, igroup)
       end do   
     end if
 
 
     ! Molecular free path of condensing gas 
-    freep(:,igas)  = 3._f*diffus(:,igas) &
+    freep(:,igroup)  = 3._f*diffus(:,igroup) &
              * sqrt( ( PI*gwtmol_dif(igas) ) / ( 8._f*RGAS*t(:) ) )
 
     ! Thermal free path of condensing gas
-    freept(:,igas) = freep(:,igas)*thcond(:) / &
-               ( diffus(:,igas) * rhoa_cgs(:, igas) &
+    freept(:,igroup) = freep(:,igroup)*thcond(:) / &
+               ( diffus(:,igroup) * rhoa_cgs(:, igas) &
              * ( CP - RGAS/( 2._f*wtmol_air(:) ) ) )
   end do
 
@@ -225,9 +235,9 @@ subroutine setupgkern(carma, cstate, rc)
 
             ! Latent heat of condensing gas 
             if( is_grp_ice(igroup) )then
-              rlh = rlhe(k,igas) + rlhm(k,igas)
+              rlh = rlhe(k,igroup) + rlhm(k,igroup)
             else
-              rlh = rlhe(k,igas)
+              rlh = rlhe(k,igroup)
             endif
 
             ! Radius-dependent parameters 
@@ -236,8 +246,8 @@ subroutine setupgkern(carma, cstate, rc)
               br = rlow_wet(k,i,igroup)     ! particle bin Boundary Radius
 
               ! These are Knudsen numbers
-              rknudn  = freep(k,igas) / br
-              rknudnt = freept(k,igas) / br
+              rknudn  = freep(k,igroup) / br
+              rknudnt = freept(k,igroup) / br
 
               ! These are "lambdas" used in correction for gas kinetic effects.
               rlam  = ( 1.33_f*rknudn  + 0.71_f ) / ( rknudn  + 1._f ) &
@@ -248,7 +258,7 @@ subroutine setupgkern(carma, cstate, rc)
 
               ! Diffusion coefficient and thermal conductivity modified for
               ! free molecular limit and for particle shape.
-              diffus1 = diffus(k,igas)*cor / ( 1._f + rlam*rknudn*cor/phish )
+              diffus1 = diffus(k,igroup)*cor / ( 1._f + rlam*rknudn*cor/phish )
               thcond1 = thcond(k)*cor / ( 1._f + rlamt*rknudnt*cor/phish )
 
               ! Save the modified thermal conductivity off so it can be used in pheat.
@@ -332,9 +342,9 @@ subroutine setupgkern(carma, cstate, rc)
 
         ! Latent heat of condensing gas 
         if( is_grp_ice(igroup) )then
-          rlh = rlhe(k,igas) + rlhm(k,igas)
+          rlh = rlhe(k,igroup) + rlhm(k,igroup)
         else
-          rlh = rlhe(k,igas)
+          rlh = rlhe(k,igroup)
         endif
 
         ! Radius-dependent parameters 
@@ -343,8 +353,8 @@ subroutine setupgkern(carma, cstate, rc)
           br = rlow_wet(k,i,igroup)     ! particle bin Boundary Radius
 
           ! These are Knudsen numbers
-          rknudn  = freep(k,igas) / br
-          rknudnt = freept(k,igas) / br
+          rknudn  = freep(k,igroup) / br
+          rknudnt = freept(k,igroup) / br
 
           ! These are "lambdas" used in correction for gas kinetic effects.
           rlam  = ( 1.33_f*rknudn  + 0.71_f ) / ( rknudn  + 1._f ) &
@@ -355,7 +365,7 @@ subroutine setupgkern(carma, cstate, rc)
 
           ! Diffusion coefficient and thermal conductivity modified for
           ! free molecular limit and for particle shape.
-          diffus1 = diffus(k,igas)*cor / ( 1._f + rlam*rknudn*cor/phish )
+          diffus1 = diffus(k,igroup)*cor / ( 1._f + rlam*rknudn*cor/phish )
           thcond1 = thcond(k)*cor / ( 1._f + rlamt*rknudnt*cor/phish )
 
           ! Save the modified thermal conductivity off so it can be used in pheat.

@@ -14,7 +14,7 @@
 !!
 !! @author Mike Mills, Tianyi Fan, Wolf Cukier
 !! @version Jul-2025
-subroutine vaporp_user(carma, cstate, iz, igas, rc, pvap_liq, pvap_ice)
+subroutine vaporp_user(carma, cstate, iz, igroup, rc, pvap_liq, pvap_ice)
 !     types
   use carma_precision_mod
   use carma_enums_mod
@@ -31,16 +31,16 @@ subroutine vaporp_user(carma, cstate, iz, igas, rc, pvap_liq, pvap_ice)
   type(carma_type), intent(inout)      :: carma     !! the carma object
   type(carmastate_type), intent(inout) :: cstate    !! the carma state object
   integer, intent(in)                  :: iz        !! z index
-  integer, intent(in)                  :: igas      !! gas index
+  integer, intent(in)                  :: igroup      !! gas index
   real(kind=f), intent(out)            :: pvap_liq  !! vapor pressure wrt liquid [dyne/cm2]
   real(kind=f), intent(out)            :: pvap_ice  !! vapor pressure wrt ice [dyne/cm2]
   integer, intent(inout)               :: rc        !! return code, negative indicates failure
   real(kind=f)                         :: offset, tcoeff, metcoeff, logpcoeff
 
-  offset    = carma%f_gas(igas)%f_vp_offset
-  tcoeff    = carma%f_gas(igas)%f_vp_tcoeff
-  metcoeff  = carma%f_gas(igas)%f_vp_metcoeff
-  logpcoeff = carma%f_gas(igas)%f_vp_logpcoeff
+  offset    = carma%f_group(igroup)%f_vp_offset
+  tcoeff    = carma%f_group(igroup)%f_vp_tcoeff
+  metcoeff  = carma%f_group(igroup)%f_vp_metcoeff
+  logpcoeff = carma%f_group(igroup)%f_vp_logpcoeff
 
   pvap_liq = 1e6_f * 10._f ** (offset - tcoeff/t(iz) - metcoeff*met - logpcoeff*log10(1e-6_f*p(iz)))
   pvap_ice = pvap_liq

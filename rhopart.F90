@@ -127,7 +127,7 @@ subroutine rhopart(carma, cstate, rc)
       ! Determine the weight percent of sulfate, and store it for later use.
       if (irhswell(igroup) == I_WTPCT_H2SO4) then
         gc_cgs     = gc(iz, igash2so4) / (xmet(iz) * ymet(iz) * zmet(iz))
-        wtpct(iz)  = wtpct_tabaz(carma, t(iz), gc_cgs, pvapl(iz, igash2o), rc)
+        wtpct(iz)  = wtpct_tabaz(carma, t(iz), gc_cgs, pvapl(iz, igroup), rc)
         if (rc < 0) return
       end if
           

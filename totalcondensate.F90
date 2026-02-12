@@ -37,6 +37,8 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
   integer                              :: i
   real(kind=f)                         :: coremass
   real(kind=f)                         :: volatilemass
+  real(kind=f)                         :: sto_vol
+  real(kind=f)                         :: sto_core
 
 
   ! Initialize local variables for keeping track of gas changes due
@@ -60,6 +62,8 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
     igascore = 0
     icore = 0
 
+    sto_vol = gwtmol_dif(igas)/gwtmol(igroup) * carma%f_group(igroup)%f_stofact
+
     if ((itype(ielem) == I_VOLATILE) .and. (igas /= 0)) then
 
       do ibin = 1, NBIN
@@ -74,7 +78,9 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
 
 	! Assume ncore = 1 or 0 always
 	if (icore > 0) then
-	  if ( itype(ievp2elem(icore)) == I_VOLATILE ) igascore = igrowgas(ievp2elem(icore))
+	  if ( itype(ievp2elem(icore)) == I_VOLATILE ) then
+      igascore = igrowgas(ievp2elem(icore))
+      sto_core = gwtmol_dif(igascore)/gwtmol_core(igroup) * carma%f_group(igroup)%f_stofact
 	endif
         
         volatilemass = (pc(iz, ibin, ielem) * rmass(ibin, igroup)) - coremass
@@ -86,18 +92,19 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
         ! in this model.
         if (volatilemass > 0._f) then
           if (is_grp_ice(igroup)) then
-            total_ice(igas) = total_ice(igas) + volatilemass
+            total_ice(igas) = total_ice(igas) + volatilemass * sto_vol
           else
-            total_liquid(igas) = total_liquid(igas) + volatilemass
+            total_liquid(igas) = total_liquid(igas) + volatilemass * sto_vol
           end if
         end if
 	if (igascore > 0) then
 	  if (is_grp_ice(igelem(ievp2elem(icore)))) then
-            total_ice(igascore) = total_ice(igascore) + coremass
+            total_ice(igascore) = total_ice(igascore) + coremass * sto_core
           else
-            total_liquid(igascore) = total_liquid(igascore) + coremass
+            total_liquid(igascore) = total_liquid(igascore) + coremass * sto_core
           end if
 	end if
+end if
       end do
     end if
   end do

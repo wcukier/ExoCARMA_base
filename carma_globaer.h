@@ -69,12 +69,13 @@
 
 ! Gas object
 #define gasname(igas)         carma%f_gas(igas)%f_name
-#define gwtmol(igas)          carma%f_gas(igas)%f_wtmol
-#define gwtmol_dif(igas)        carma%f_gas(igas)%f_wtmol_dif
-#define ivaprtn(igas)         carma%f_gas(igas)%f_ivaprtn
+#define gwtmol_dif(igas)      carma%f_gas(igas)%f_wtmol_dif
 #define igcomp(igas)          carma%f_gas(igas)%f_icomposition
 #define dgc_threshold(igas)   carma%f_gas(igas)%f_dgc_threshold
 #define ds_threshold(igas)    carma%f_gas(igas)%f_ds_threshold
+
+
+
 
 ! Group object
 #define groupname(igroup)       carma%f_group(igroup)%f_name
@@ -116,6 +117,11 @@
 #define do_mie(igroup)          carma%f_group(igroup)%f_do_mie
 #define imiertn(igroup)         carma%f_group(igroup)%f_imiertn
 #define dpc_threshold(igroup)   carma%f_group(igroup)%f_dpc_threshold
+#define gwtmol(igroup)          carma%f_group(igroup)%f_wtmol
+#define gwtmol_core(igroup)     carma%f_group(igroup)%f_wtmol_core
+#define ivaprtn(igroup)         carma%f_group(igroup)%f_ivaprtn
+
+
 
 ! Solute object
 #define solname(isolute)      carma%f_solute(isolute)%f_name

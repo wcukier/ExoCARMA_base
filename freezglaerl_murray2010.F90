@@ -111,8 +111,8 @@ subroutine freezglaerl_murray2010(carma, cstate, iz, rc)
                   !
                   !   rnuclg = (fice(RHi) - fice(RHi_old)) / dtime
                   !
-                  ssi    = supsati(iz,igas)
-                  ssiold = supsatiold(iz,igas)
+                  ssi    = supsati(iz,igroup)
+                  ssiold = supsatiold(iz,igroup)
                   
                   if ((ssi >= ssmin) .and. (ssi > ssiold)) then
                     dfice = kice1 * (1._f + min(ssmax, ssi)) * 100._f - kice2

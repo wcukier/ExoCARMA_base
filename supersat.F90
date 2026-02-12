@@ -6,7 +6,7 @@
 !!
 !! @author Andy Ackerman, Chuck Bardeen
 !! @version Dec-1995, Aug-2010
-subroutine supersat(carma, cstate, iz, igas, rc)
+subroutine supersat(carma, cstate, iz, igroup, rc)
 
   ! types
   use carma_precision_mod
@@ -23,16 +23,20 @@ subroutine supersat(carma, cstate, iz, igas, rc)
   type(carma_type), intent(in)         :: carma   !! the carma object
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
-  integer, intent(in)                  :: igas    !! gas index
+  integer, intent(in)                  :: igroup    !! group index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
 
   ! Local declarations
   real(kind=f)  :: rvap
   real(kind=f)  :: gc_cgs
   real(kind=f)  :: alpha
+  integer                  :: ielem, igas, stofact    !! gas index
+
+  ielem = ienconc(igroup)     ! element of particle number concentration
+  igas = igrowgas(ielem) 
 
   ! Calculate vapor pressures.
-  call vaporp(carma, cstate, iz, igas, rc)
+  call vaporp(carma, cstate, iz, igroup, rc)
 
   ! Define gas constant for this gas
   rvap = RGAS / gwtmol_dif(igas)
@@ -42,13 +46,14 @@ subroutine supersat(carma, cstate, iz, igas, rc)
 
   ! Add in reaction saturation ratio correction for type III reactions (Helling
   ! and Woitke 2006)
-  if ( carma%f_gas(igas)%f_is_type3 .eq. 1 ) then ! WC
-    ! note this calculates S_r = sqrt(S) - 1, the below calculation is for S-1
-    supsatl(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapl(iz,igas)) - 1._f 
-    supsati(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapi(iz,igas)) - 1._f
+  if ( carma%f_group(igroup)%f_is_type3 .eq. 1 ) then ! WC
+    stofact = carma%f_group(igroup)%f_stofact
+    ! note this calculates S_r = S^(1/stofact) - 1, the below calculation is for S-1
+    supsatl(iz,igroup) = (gc_cgs * rvap * t(iz) / pvapl(iz,igroup))**(1/stofact) - 1._f 
+    supsati(iz,igroup) = (gc_cgs * rvap * t(iz) / pvapi(iz,igroup))**(1/stofact) - 1._f
   else
-    supsatl(iz,igas) = (gc_cgs * rvap * t(iz) - pvapl(iz,igas)) / pvapl(iz,igas)
-    supsati(iz,igas) = (gc_cgs * rvap * t(iz) - pvapi(iz,igas)) / pvapi(iz,igas)
+    supsatl(iz,igroup) = (gc_cgs * rvap * t(iz) - pvapl(iz,igroup)) / pvapl(iz,igroup)
+    supsati(iz,igroup) = (gc_cgs * rvap * t(iz) - pvapi(iz,igroup)) / pvapi(iz,igroup)
   endif
 
 
@@ -62,19 +67,19 @@ subroutine supersat(carma, cstate, iz, igas, rc)
   if (do_incloud) then
     alpha = rhcrit(iz) * (1._f - cldfrc(iz)) + cldfrc(iz)
     
-    supsatl(iz,igas) = (gc_cgs * rvap * t(iz) - alpha * pvapl(iz,igas)) / pvapl(iz,igas)
-    supsati(iz,igas) = (gc_cgs * rvap * t(iz) - alpha * pvapi(iz,igas)) / pvapi(iz,igas)
+    supsatl(iz,igroup) = (gc_cgs * rvap * t(iz) - alpha * pvapl(iz,igroup)) / pvapl(iz,igroup)
+    supsati(iz,igroup) = (gc_cgs * rvap * t(iz) - alpha * pvapi(iz,igroup)) / pvapi(iz,igroup)
     
     ! Limit supersaturation to liquid saturation.
-    supsatl(iz,igas) = min(supsatl(iz,igas), 0._f)
-    supsati(iz,igas) = min(supsati(iz,igas), (pvapl(iz,igas) &
-	- alpha * pvapi(iz,igas)) / pvapi(iz,igas))        
+    supsatl(iz,igroup) = min(supsatl(iz,igroup), 0._f)
+    supsati(iz,igroup) = min(supsati(iz,igroup), (pvapl(iz,igroup) &
+	- alpha * pvapi(iz,igroup)) / pvapi(iz,igroup))        
   end if
 
 
   ! supsatl close to 0 causes carma to crash
-  if (abs(supsatl(iz,igas)) < 1e-16_f) then
-    supsatl(iz,igas) = 1e-16_f
+  if (abs(supsatl(iz,igroup)) < 1e-16_f) then
+    supsatl(iz,igroup) = 1e-16_f
   end if
 
   return
@@ -89,7 +94,7 @@ end
 !!
 !! @author Andy Ackerman, Chuck Bardeen
 !! @version Dec-1995, Aug-2010
-subroutine supersat_nocldf(carma, cstate, iz, igas, ssi, ssl, rc)
+subroutine supersat_nocldf(carma, cstate, iz, igroup, ssi, ssl, rc)
 
   ! types
   use carma_precision_mod
@@ -104,7 +109,7 @@ subroutine supersat_nocldf(carma, cstate, iz, igas, ssi, ssl, rc)
   type(carma_type), intent(in)         :: carma   !! the carma object
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
-  integer, intent(in)                  :: igas    !! gas index
+  integer, intent(in)                  :: igroup    !! gas index
   real(kind=f), intent(out)            :: ssl
   real(kind=f), intent(out)            :: ssi
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
@@ -113,17 +118,21 @@ subroutine supersat_nocldf(carma, cstate, iz, igas, ssi, ssl, rc)
   real(kind=f)  :: rvap
   real(kind=f)  :: gc_cgs
   real(kind=f)  :: alpha
+  integer                  :: ielem, igas, stofact    !! gas index
+
+  ielem = ienconc(igroup)     ! element of particle number concentration
+  igas = igrowgas(ielem) 
 
   ! Calculate vapor pressures.
-  call vaporp(carma, cstate, iz, igas, rc)
+  call vaporp(carma, cstate, iz, igroup, rc)
 
   ! Define gas constant for this gas
   rvap = RGAS / gwtmol_dif(igas)
 
   gc_cgs = gc(iz,igas) / (zmet(iz)*xmet(iz)*ymet(iz))
 
-  ssl = (gc_cgs * rvap * t(iz) - pvapl(iz,igas)) / pvapl(iz,igas)
-  ssi = (gc_cgs * rvap * t(iz) - pvapi(iz,igas)) / pvapi(iz,igas)
+  ssl = (gc_cgs * rvap * t(iz) - pvapl(iz,igroup)) / pvapl(iz,igroup)
+  ssi = (gc_cgs * rvap * t(iz) - pvapi(iz,igroup)) / pvapi(iz,igroup)
 
   return
 end

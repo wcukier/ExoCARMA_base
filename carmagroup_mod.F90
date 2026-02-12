@@ -36,18 +36,36 @@ module carmagroup_mod
 
 contains
 
-  subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, ishape, eshape, is_ice, &
-      rc, irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
+  subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, wtmol, ishape, eshape, is_ice, &
+      rho_cond, surften_0, coldia,  vp_offset, vp_tcoeff,  ivaprtn, rc,&
+      wtmol_core, is_type3, surften_slope, vp_metcoeff, vp_logpcoeff, lat_heat_e, stofact, &
+      irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
       cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold)
     type(carma_type), intent(inout)             :: carma               !! the carma object
     integer, intent(in)                         :: igroup              !! the group index
     character(*), intent(in)                    :: name                !! the group name, maximum of 255 characters
     real(kind=f), intent(in)                    :: rmin                !! the minimum radius, can be specified [cm]
     real(kind=f), intent(in)                    :: rmrat               !! the volume ratio between bins
+    real(kind=f), intent(in)                    :: wtmol               !! the molar mass of the particle (mantle)
     integer, intent(in)                         :: ishape              !! the type of the particle shape [I_SPHERE | I_HEXAGON | I_CYLINDER | I_FRACTAL]
     real(kind=f), intent(in)                    :: eshape              !! the aspect ratio of the particle shape (length/diameter)
     logical, intent(in)                         :: is_ice              !! is this an ice particle?
+    real(kind=f), intent(in)              :: rho_cond        !! density of condenstate [g/cm^3] WC
+    real(kind=f), intent(in)              :: surften_0       !! surface tension at 0 K (assuming linear extrapolation) [dyne/cm] WC
+    real(kind=f), intent(in)              :: coldia          !! collision diameter [cm] WC
+    real(kind=f), intent(in)              :: vp_offset       !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure)) WC
+    real(kind=f), intent(in)              :: vp_tcoeff       !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure)) WC    
+        integer, intent(in)                   :: ivaprtn         !! vapor pressure routine for this gas
+
     integer, intent(out)                        :: rc                  !! return code, negative indicates failure
+    real(kind=f), optional, intent(in)          :: wtmol_core          !! molar mass of the core of the particle
+    integer, optional, intent(in)         :: is_type3        !! 1 for type III reations, 0 otherwise (see Helling and Woitke 2006) WC
+    real(kind=f), optional, intent(in)    :: surften_slope   !! slope of surface tension wrt temperature (surften = surften0 - surften_slope (t - 273.15)) [dyne/cm/K] TODO WC: do we actually have this offset???
+    real(kind=f), optional, intent(in)    :: vp_metcoeff     !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure))
+    real(kind=f), optional, intent(in)    :: vp_logpcoeff    !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure))
+    real(kind=f), optional, intent(in)    :: lat_heat_e      !! Latent heat of evaporation [cm^2/s^2] WC
+    integer, optional, intent(in)         :: stofact         !! stoichiometry factor between gas phase and condensate WC
+
     integer, optional, intent(in)               :: irhswell            !! the parameterization for particle swelling from relative humidity [I_FITZGERALD | I_GERBER]
     integer, optional, intent(in)               :: irhswcomp           !! the composition for particle swelling from relative humidity [I_FITZGERALD | I_GERBER]
     complex(kind=f), optional, intent(in)       :: refidx(carma%f_NWAVE) !! refractive index for the particle
@@ -119,7 +137,6 @@ contains
     carma%f_group(igroup)%f_is_cloud    = .false.
     carma%f_group(igroup)%f_is_sulfate  = .false.
     carma%f_group(igroup)%f_dpc_threshold = 0._f
-    
 
     ! Any optical properties?
     if (carma%f_NWAVE > 0) then
@@ -154,8 +171,15 @@ contains
     carma%f_group(igroup)%f_ishape      = ishape
     carma%f_group(igroup)%f_eshape      = eshape
     carma%f_group(igroup)%f_is_ice      = is_ice
-    
-    
+    carma%f_group(igroup)%f_wtmol = wtmol
+    carma%f_group(igroup)%f_rho_cond     = rho_cond
+    carma%f_group(igroup)%f_surften_0    = surften_0
+    carma%f_group(igroup)%f_coldia       = coldia
+    carma%f_group(igroup)%f_vp_offset    = vp_offset
+    carma%f_group(igroup)%f_vp_tcoeff    = vp_tcoeff
+    carma%f_group(igroup)%f_ivaprtn      = ivaprtn
+
+
     ! Defaults for optional parameters
     carma%f_group(igroup)%f_irhswell    = 0
     carma%f_group(igroup)%f_do_mie      = .false.
@@ -168,7 +192,14 @@ contains
     carma%f_group(igroup)%f_cnsttype    = I_CNSTTYPE_PROGNOSTIC
     carma%f_group(igroup)%f_maxbin      = carma%f_NBIN
     carma%f_group(igroup)%f_rmassmin    = 0.0_f
-    
+    carma%f_group(igroup)%f_wtmol_core  = 0.0_f
+    carma%f_group(igroup)%f_is_type3        = 0
+    carma%f_group(igroup)%f_surften_slope   = 0._f
+    carma%f_group(igroup)%f_vp_metcoeff     = 0._f
+    carma%f_group(igroup)%f_vp_logpcoeff    = 0._f
+    carma%f_group(igroup)%f_lat_heat_e      = -1.0_f
+    carma%f_group(igroup)%f_stofact         = 1
+
     ! Set optional parameters.
     if (present(irhswell))   carma%f_group(igroup)%f_irhswell     = irhswell
     if (present(irhswcomp))  carma%f_group(igroup)%f_irhswcomp    = irhswcomp
@@ -190,6 +221,15 @@ contains
     if (present(imiertn))    carma%f_group(igroup)%f_imiertn      = imiertn
     if (present(is_sulfate)) carma%f_group(igroup)%f_is_sulfate   = is_sulfate
     if (present(dpc_threshold)) carma%f_group(igroup)%f_dpc_threshold = dpc_threshold
+    if (present(wtmol_core)) carma%f_group(igroup)%f_wtmol_core = wtmol_core
+    if (present(is_type3))      carma%f_group(igroup)%f_is_type3        = is_type3
+    if (present(surften_slope)) carma%f_group(igroup)%f_surften_slope   = surften_slope
+    if (present(vp_metcoeff))   carma%f_group(igroup)%f_vp_metcoeff     = vp_metcoeff
+    if (present(vp_logpcoeff))  carma%f_group(igroup)%f_vp_logpcoeff    = vp_logpcoeff
+    if (present(lat_heat_e))    carma%f_group(igroup)%f_lat_heat_e      = lat_heat_e
+    if (present(stofact))       carma%f_group(igroup)%f_stofact         = stofact
+
+
 
     
     ! Initialize other properties.

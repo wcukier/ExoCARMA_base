@@ -64,7 +64,7 @@ subroutine setupvf_std(carma, cstate, j, rc)
 
   type(carma_type), intent(in)         :: carma    !! the carma object
   type(carmastate_type), intent(inout) :: cstate   !! the carma state object
-  integer, intent(in)                  :: j        !! group index
+  integer, intent(in)                  :: j        !! group index TODO WC: refactor igroup
   integer, intent(inout)               :: rc       !! return code, negative indicates failure
 
   ! Local declarations

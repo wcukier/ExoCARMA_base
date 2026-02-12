@@ -76,7 +76,7 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
   
             if (igas /= 0) then
           
-              ss = max( supsatl(iz,igas), supsatlold(iz,igas) )
+              ss = max( supsatl(iz,ig), supsatlold(iz,ig) )
   
               do inuc = 1,nnuc2elem(iepart)
                 ienucto = inuc2elem(inuc,iepart)
@@ -129,11 +129,11 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
             if( itype(iepart) .eq. I_VOLATILE ) then
     
               if( is_grp_ice(ig) )then
-                ss = supsati(iz,igas)
-                pvap = pvapi(iz,igas)
+                ss = supsati(iz,ig)
+                pvap = pvapi(iz,ig)
               else
-                ss = supsatl(iz,igas)
-                pvap = pvapl(iz,igas)
+                ss = supsatl(iz,ig)
+                pvap = pvapl(iz,ig)
               endif
     
               g0 = gro(iz,ibin_small(ig),ig,igas)
@@ -169,7 +169,7 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
             ienucto = inuc2elem(inuc,iepart)
     
             if (iand(inucproc(iepart,ienucto), I_AERFREEZE) .ne. 0) then
-              if( (supsati(iz,igas) .gt. 0.4_f) .and. (t(iz) .lt. 233.16_f) ) then
+              if( (supsati(iz,ig) .gt. 0.4_f) .and. (t(iz) .lt. 233.16_f) ) then
                 ntsubsteps = maxsubsteps
               endif
             endif

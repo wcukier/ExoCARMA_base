@@ -28,7 +28,7 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
 
   ! Local Variables
-  integer                              :: igas    !! gas index
+  integer                              :: igas, igroup   !! gas index
   real(kind=f)                         :: gc_cgs
   real(kind=f)                         :: gc_old
   real(kind=f)                         :: rvap
@@ -54,7 +54,8 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
   call totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
   
   do igas = 1,NGAS
-    stofact = carma%f_gas(igas)%f_wtmol_dif/carma%f_gas(igas)%f_wtmol * carma%f_gas(igas)%f_stofact !WC
+    ! Moved stofact calculations to totalcondensate
+    ! stofact = carma%f_gas(igas)%f_wtmol_dif/carma%f_gas(igas)%f_wtmol * carma%f_gas(igas)%f_stofact !WC
 
     ! We do not seem to be conserving mass and energy, so rather than relying upon gasprod
     ! and rlheat, recalculate the total change in condensate to determine the change
@@ -65,14 +66,14 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
     gasprod(igas) = ((previous_ice(igas) - total_ice(igas)) + &
 		                  (previous_liquid(igas) - total_liquid(igas))) / dtime
     rlprod        = rlprod - ((previous_ice(igas) - total_ice(igas)) * &
-		                  (rlhe(iz,igas) + rlhm(iz,igas)) + &
+		                  (rlhe(iz,igroup) + rlhm(iz,igroup)) + &
                       (previous_liquid(igas) - total_liquid(igas)) * &
-		                  (rlhe(iz,igas))) / (CP * rhoa(iz) * dtime) 
+		                  (rlhe(iz,igroup))) / (CP * rhoa(iz) * dtime) 
 
     gc_old = gc(iz,igas)
 
     ! Don't let the gas concentration go negative.
-    gc(iz,igas) = gc(iz,igas) + dtime * (gasprod(igas)*stofact + phochemprod_gas(iz,igas))
+    gc(iz,igas) = gc(iz,igas) + dtime * (gasprod(igas) + phochemprod_gas(iz,igas))
     
 
     if (gc(iz,igas) < 0.0_f) then
@@ -80,10 +81,10 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
         if (nretries == maxretries) then 
           !if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
           !      lat, lon, gc(iz,igas), gasprod(igas), &
-          !      supsati(iz,igas), supsatl(iz,igas), t(iz)
+          !      supsati(iz,igas), supsatl(iz,igroup), t(iz)
           ! if (do_print) write(LUNOPRT,4) trim(gasname(igas)), iz, &
           !       lat, lon, gc(iz,igas), gasprod(igas), &
-          !       supsati(iz,igas), supsatl(iz,igas), t(iz)
+          !       supsati(iz,igas), supsatl(iz,igroup), t(iz)
           ! if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
           !       supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
           gc(iz,igas) = 1e-50_f * rhoa(iz)
@@ -94,7 +95,7 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
       else
         if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
                 lat, lon, gc(iz,igas), gasprod(igas), &
-                supsati(iz, igas), supsatl(iz,igas), t(iz)
+                supsati(iz, igroup), supsatl(iz,igroup), t(iz)
         rc = RC_WARNING_RETRY
       end if
     end if
@@ -112,8 +113,8 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
           if (nretries == maxretries) then 
             if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &
               lat, lon, dtime * gasprod(igas) / gc(iz,igas)
-            if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
-              supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
+            if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igroup), &
+              supsatlold(iz,igroup), told(iz), d_gc(iz,igas), d_t(iz)
           end if
         else
           if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &

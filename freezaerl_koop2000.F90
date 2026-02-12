@@ -113,8 +113,8 @@ subroutine freezaerl_koop2000(carma, cstate, iz, rc)
                 !  Loop over particle bins.
                 do ibin = 1, NBIN
   
-                  ssi = supsati(iz,igas)
-                  ssl = supsatl(iz,igas)
+                  ssi = supsati(iz,igroup)
+                  ssl = supsatl(iz,igroup)
   
                   ! Calculate approximate critical saturation needed for homogeneous freezing
                   ! of sulfate aerosols (see Jensen and Toon, GRL, 1994).
@@ -151,7 +151,7 @@ subroutine freezaerl_koop2000(carma, cstate, iz, rc)
                     aw    = 1._f + ssl                                                            ! ?
 
                     ! Kelvin effect on water activity
-                    fkelv = exp(akelvin(iz,igas) / r(ibin,igroup))                                ! ?
+                    fkelv = exp(akelvin(iz,igroup) / r(ibin,igroup))                                ! ?
                     aw    = aw / fkelv
 
                     ! Nucleation rate

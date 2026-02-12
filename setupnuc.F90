@@ -72,7 +72,7 @@ subroutine setupnuc(carma, cstate, rc)
           if (isol .ne. 0) then
             ! This is term "B" in Pruppacher and Klett's eqn. 6-28.=
             do ibin = 1,NBIN
-                bsol = 3._f*sol_ions(isol)*rmass(ibin,igroup)*gwtmol(igas) &
+                bsol = 3._f*sol_ions(isol)*rmass(ibin,igroup)*gwtmol(igroup) &
                   / ( 4._f*PI*solwtmol(isol)*RHO_W )
                 scrit(k,ibin,igroup,igas) = sqrt( 4._f * akelvin(k,igas)**3 / ( 27._f * bsol ) )
 	    enddo

@@ -10,7 +10,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Dec-1995
-subroutine vaporp(carma, cstate, iz, igas, rc)
+subroutine vaporp(carma, cstate, iz, igroup, rc)
 
   !     types
   use carma_precision_mod
@@ -27,7 +27,7 @@ subroutine vaporp(carma, cstate, iz, igas, rc)
   type(carma_type), intent(in)         :: carma   !! the carma object
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
-  integer, intent(in)                  :: igas    !! gas index
+  integer, intent(in)                  :: igroup    !! gas index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
 
   real(kind=f)                        :: old_pvapl
@@ -36,68 +36,68 @@ subroutine vaporp(carma, cstate, iz, igas, rc)
   !
   ! As new gases are supported, this table should be expanded with new entries for
   ! the appropriate vapor pressure rotuines.
-  select case(ivaprtn(igas))
+  select case(ivaprtn(igroup))
 
     case (I_VAPRTN_H2O_BUCK1981)
-      call vaporp_h2o_buck1981(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_h2o_buck1981(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
     
     case(I_VAPRTN_H2O_MURPHY2005)
-      call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
     
     case(I_VAPRTN_H2O_GOFF1946)
-      call vaporp_h2o_goff1946(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_h2o_goff1946(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
     
     case(I_VAPRTN_H2SO4_AYERS1980)
-      call vaporp_h2so4_ayers1980(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_h2so4_ayers1980(carma, cstate, iz, igroup, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_S8_FERREIRA2011)
-      call vaporp_s8_ferreira2011(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_s8_ferreira2011(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_S8_ZAHNLE2016)
-      call vaporp_s8_zahnle2016(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_s8_zahnle2016(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_S2_LYONS2008)
-      call vaporp_s2_lyons2008(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_s2_lyons2008(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_KCL_MORLEY2012)
-      call vaporp_kcl_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_kcl_morley2012(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_ZNS_MORLEY2012)
-      call vaporp_zns_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_zns_morley2012(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_NA2S_MORLEY2012)
-      call vaporp_na2s_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_na2s_morley2012(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_MNS_MORLEY2012)
-      call vaporp_mns_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_mns_morley2012(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_CR_MORLEY2012)
-      call vaporp_cr_morley2012(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_cr_morley2012(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_FE_VISSCHER2010)
-      call vaporp_fe_visscher2010(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_fe_visscher2010(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_MG2SIO4_VISSCHER2010)
-      call vaporp_mg2sio4_visscher2010(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_mg2sio4_visscher2010(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_TIO2_LODDERS1999)
-      call vaporp_tio2_lodders1999(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_tio2_lodders1999(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_TIO2_HELLING2001)
-      call vaporp_tio2_helling2001(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_tio2_helling2001(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_AL2O3_WAKEFORD2017)
-      call vaporp_al2o3_wakeford2017(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_al2o3_wakeford2017(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_CO_WYLIE1958)
-      call vaporp_co_wylie1958(carma, cstate, iz, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_co_wylie1958(carma, cstate, iz, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case(I_VAPRTN_USER) ! WC
-      call vaporp_user(carma, cstate, iz, igas, rc, pvapl(iz, igas), pvapi(iz, igas))
+      call vaporp_user(carma, cstate, iz, igroup, rc, pvapl(iz, igroup), pvapi(iz, igroup))
 
     case default
       if (do_print) write(LUNOPRT,*) "vaporp:: ERROR - Unknown vapor pressure routine  (", &
-	ivaprtn(igas), ") for gas (", igas, ")."
+	ivaprtn(igroup), ") for gas (", igroup, ")."
       rc = RC_ERROR
       return
   end select

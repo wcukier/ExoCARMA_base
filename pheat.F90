@@ -88,13 +88,13 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   !
   ! Ignore solute factor for ice particles.
   if( is_grp_ice(igroup)  )then
-    expon = akelvini(iz,igas) / rup_wet(iz,ibin,igroup)
+    expon = akelvini(iz,igroup) / rup_wet(iz,ibin,igroup)
     expon = max(-POWMAX, expon)
     akas  = exp( expon )
   elseif (igas .eq. igash2so4) then
     argsol = wtpct(iz)/100._f/WTMOL_H2SO4 / &
       ( (1._f - wtpct(iz)/100._f)/WTMOL_H2O + wtpct(iz)/100._f/WTMOL_H2SO4 )
-    expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup)
+    expon = akelvin(iz,igroup)  / rup_wet(iz,ibin,igroup)
     expon = max(-POWMAX, expon)
     akas  = exp( expon ) * argsol
   else
@@ -156,7 +156,7 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
       !      endif 
       !    endif    ! nelemg(igroup) > 1
 
-    expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup) - argsol 
+    expon = akelvin(iz,igroup)  / rup_wet(iz,ibin,igroup) - argsol 
     expon = max(-POWMAX, expon)
     akas  = exp( expon )
   endif
@@ -174,11 +174,11 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   !write(*,*) iz,ibin,igroup,igas,g0,g1,g2
 
   if( is_grp_ice(igroup) )then
-    ss   = supsati(iz,igas)
-    pvap = pvapi(iz,igas)
+    ss   = supsati(iz,igroup)
+    pvap = pvapi(iz,igroup)
   else
-    ss = supsatl(iz,igas)
-    pvap = pvapl(iz,igas)
+    ss = supsatl(iz,igroup)
+    pvap = pvapl(iz,igroup)
   endif
 
 
@@ -195,9 +195,9 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   
     ! Latent heat of condensing gas 
     if( is_grp_ice(igroup) )then
-      rlh = rlhe(iz,igas) + rlhm(iz,igas)
+      rlh = rlhe(iz,igroup) + rlhm(iz,igroup)
     else
-      rlh = rlhe(iz,igas)
+      rlh = rlhe(iz,igroup)
     endif
   
     ! The particle temperature must be solved for by iterating, with an

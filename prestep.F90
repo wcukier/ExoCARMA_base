@@ -44,7 +44,10 @@ subroutine prestep(carma, cstate, rc)
     if (NGAS > 0) then
       d_gc(:,:) = gc(:,:) - gcl(:,:)
       
-      do igas = 1, NGAS
+      do igrp = 1, NGROUP
+        ielem = ienconc(igrp)     ! element of particle number concentration
+        igas = igrowgas(ielem) 
+
         do iz = 1, NZ
     
           ! NOTE: When d_gc is negative, you can get into problems with overshoot
@@ -61,8 +64,8 @@ subroutine prestep(carma, cstate, rc)
           ! substep the gas unless both of these are true. This might run into
           ! trouble if d_t is large and negative.
 !          if (d_gc(iz, igas) < 0._f) then
-          if ((d_gc(iz, igas) < 0._f) .and. ((supsatiold(iz, igas) > 0._f) .or. &
-		(supsati(iz, igas) > 0._f))) then
+          if ((d_gc(iz, igas) < 0._f) .and. ((supsatiold(iz, igrp) > 0._f) .or. &
+		(supsati(iz, igrp) > 0._f))) then
           
             ! Start from the new state and don't step the gas.
             d_gc(iz, igas) = 0._f

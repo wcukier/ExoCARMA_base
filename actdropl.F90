@@ -125,7 +125,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
                     (pc(iz,ibin,iepart) .gt. SMALL_PC) )then
 
                   if( inucproc(iepart,ienucto) .eq. I_DROPACT ) then
-		                if (supsatl(iz,igas) .gt. scrit(iz,ibin,igroup,igas)) then
+		                if (supsatl(iz,igroup) .gt. scrit(iz,ibin,igroup,igas)) then
  		                  rnuclg(ibin,igroup,ignucto) = 1.0e3_f
 		                endif
                   else  
@@ -134,16 +134,16 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
                     if (igas .eq. igash2so4) then
                       rho_cond = sulfate_density(carma, wtpct(iz), t(iz), rc)
                     else
-                      rho_cond = carma%f_gas(igas)%f_rho_cond !WC
+                      rho_cond = carma%f_group(igroup)%f_rho_cond !WC
                     endif
 
 	  
-                    surftens = akelvin(iz,igas) * t(iz) * rho_cond * RGAS / (2._f * gwtmol(igas))
+                    surftens = akelvin(iz,igroup) * t(iz) * rho_cond * RGAS / (2._f * gwtmol(igroup))
 	                  rvap = RGAS / gwtmol_dif(igas)
                     gc_cgs = gc(iz,igas) / (zmet(iz)*xmet(iz)*ymet(iz))
 
                     ! Gao 2017 eqn 4 
-	                  agnuc = max(0._f,akelvin(iz,igas)/log(supsatl(iz,igas) + 1._f))
+	                  agnuc = max(0._f,akelvin(iz,igroup)/log(supsatl(iz,igroup) + 1._f))
 	            
 	                  ccn_gas = igrowgas(iepart)
 
@@ -153,7 +153,8 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 	                 
 	                    if (mucos(igas,igroup) .eq. 0._f) then
                         ! Set minimum contact angle to 0.1 degrees
-                        imucos = min(surfacetens(iz,igrowgas(iepart))/surftens,0.9999984769_f)
+                        write(*, *) "mucos not set, double check the calculatuon here" !TODO WC
+                        imucos = min(surfacetens(iz,igroup)/surftens,0.9999984769_f)
                       else
                         imucos = mucos(igas,igroup)
                       endif
@@ -174,7 +175,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 
                       ! g (number of molecules in a particle with radius a_c)
 	                    molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3._f &
-	                      / gwtmol(igas) * AVG
+	                      / gwtmol(igroup) * AVG
 
 	                    radratio = r(ibin,igroup)/agnuc
                       

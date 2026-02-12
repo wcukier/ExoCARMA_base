@@ -86,8 +86,8 @@ subroutine hetnucl(carma, cstate, iz, rc)
 
       iepart = ienconc(igroup)              ! particle number density element
 
-      rmw = gwtmol(igas) / AVG
-      R_H2O = RGAS / gwtmol(igas)
+      rmw = gwtmol(igroup) / AVG
+      R_H2O = RGAS / gwtmol(igroup)
       rnh2o = gc(iz,igas) * R_H2O / BK
 
       ! Calculate nucleation loss rates.  Do not allow nucleation into
@@ -136,13 +136,13 @@ subroutine hetnucl(carma, cstate, iz, rc)
 
 		!write(*,*) p(iz),supsati(iz,igas)
 
-              if ((supsati(iz,igas) .gt. 0._f)) then
-                rlogs = log(supsati(iz,igas) + 1._f)
+              if ((supsati(iz,igroup) .gt. 0._f)) then
+                rlogs = log(supsati(iz,igroup) + 1._f)
       
                 ! Critical ice germ radius formed in the sulfate solution
                 !
                 !   Eq. 2, Rapp & Thomas [2006]
-                ag = 2._f * gwtmol(igas) * surfctia(iz) / rgas / t(iz) / RHO_I / rlogs
+                ag = 2._f * gwtmol(igroup) * surfctia(iz) / rgas / t(iz) / RHO_I / rlogs
       
                 ! Heterogeneous nucleation geometric factor
                 !

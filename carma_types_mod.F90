@@ -80,29 +80,16 @@ module carma_types_mod
     !   name          Name of the gas
     !   shortname     Short name of the gas
     !   wtmol         Molecular weight for the gas [g/mol]
-    !   ivaprtn       vapor pressure routine for the gas
     !   dgc_threshold convergence criteria for gas concentration [fraction]
     !   ds_threshold  convergence criteria for gas saturation [fraction]
     !
     character(len=CARMA_NAME_LEN)               :: f_name
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
-    real(kind=f)                                :: f_wtmol
     real(kind=f)                                :: f_wtmol_dif
-    integer                                     :: f_ivaprtn
     integer                                     :: f_icomposition
     real(kind=f)                                :: f_dgc_threshold
     real(kind=f)                                :: f_ds_threshold
-    real(kind=f)                                :: f_rho_cond      ! WC
-    real(kind=f)                                :: f_surften_0     ! WC
-    real(kind=f)                                :: f_surften_slope ! WC
-    real(kind=f)                                :: f_coldia        ! WC
-    real(kind=f)                                :: f_lat_heat_e    ! WC
-    integer                                     :: f_is_type3      ! WC
-    real(kind=f)                                :: f_vp_offset     ! WC
-    real(kind=f)                                :: f_vp_tcoeff     ! WC
-    real(kind=f)                                :: f_vp_metcoeff   ! WC
-    real(kind=f)                                :: f_vp_logpcoeff  ! WC
-    integer                                     :: f_stofact       ! WC
+
   end type carmagas_type
 
 
@@ -169,7 +156,7 @@ module carma_types_mod
     !   ifallrtn    routine to use to calculate fall velocity  [I_FALLRTN_...]
     !   imiertn     mie routine for optical properties [I_MIERTN_...]
     !   dpc_threshold convergence criteria for particle concentration [fraction]
-    !
+    !   ivaprtn       vapor pressure routine for the gas
     character(len=CARMA_NAME_LEN)               :: f_name
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
     integer                                     :: f_cnsttype
@@ -215,6 +202,23 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_arat       ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rrat       ! (NBIN)
     real(kind=f)                                :: f_dpc_threshold
+    real(kind=f)                                :: f_wtmol     ! WC
+    real(kind=f)                                :: f_wtmol_core     ! WC
+    real(kind=f)                                :: f_rho_cond      ! WC
+    real(kind=f)                                :: f_surften_0     ! WC
+    real(kind=f)                                :: f_surften_slope ! WC
+    real(kind=f)                                :: f_coldia        ! WC
+    real(kind=f)                                :: f_lat_heat_e    ! WC
+    integer                                     :: f_is_type3      ! WC
+    real(kind=f)                                :: f_vp_offset     ! WC
+    real(kind=f)                                :: f_vp_tcoeff     ! WC
+    real(kind=f)                                :: f_vp_metcoeff   ! WC
+    real(kind=f)                                :: f_vp_logpcoeff  ! WC
+    integer                                     :: f_stofact       ! WC
+    integer                                     :: f_ivaprtn
+
+
+
   end type carmagroup_type
   
   
@@ -875,26 +879,26 @@ module carma_types_mod
     !   dtpart    Delta particle temperature [K]
     !   phprod    Particle heating production (substep) [K/s]
     !
-    real(kind=f), allocatable, dimension(:,:)    :: f_diffus     ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_rlhe       ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_rlhm       ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_pvapl      ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_pvapi      ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:,:)    :: f_diffus     ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_rlhe       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_rlhm       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_pvapl      ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_pvapi      ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:)      :: f_surfctwa   ! (NZ)
     real(kind=f), allocatable, dimension(:)      :: f_surfctiw   ! (NZ)
     real(kind=f), allocatable, dimension(:)      :: f_surfctia   ! (NZ)
-    real(kind=f), allocatable, dimension(:,:)    :: f_akelvin    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_akelvini   ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_surfacetens   ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:,:)    :: f_akelvin    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_akelvini   ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_surfacetens   ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:)    :: f_desorption   ! (NGAS)
     real(kind=f), allocatable, dimension(:,:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:,:)    :: f_gro2       ! (NZ,NGROUP,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatlold ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatiold ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatlold ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatiold ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:,:)  :: f_scrit      ! (NZ,NBIN,NGROUP,NGAS)
 !    real(kind=f), allocatable, dimension(:,:)  :: f_agnuc      ! (NZ,NGAS)
 !    real(kind=f), allocatable, dimension(:,:)  :: f_deltafg      ! (NZ,NGAS)

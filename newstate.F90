@@ -292,12 +292,14 @@ subroutine newstate(carma, cstate, rc)
               t(iz) = told(iz)
               do igas = 1,NGAS
                 gc(iz,igas) = gcl(iz,igas)
+              end do
 
+              do igas = 1, NGROUP
                 ! Now that we have reset the gas concentration, we need to recalculate the supersaturation.  
-                call supersat(carma, cstate, iz, igas, rc)
+                call supersat(carma, cstate, iz, igroup, rc)
                 if (rc < RC_OK) return
               end do
-              
+
               rc = RC_OK
               takeSteps = .true.
               exit
@@ -419,8 +421,10 @@ subroutine newstate(carma, cstate, rc)
       if (do_substep) then
         gc(:, igas) = gc(:, igas) + (1._f - scale_cldfrc(:)) * d_gc(:, igas)
       end if
+    end do
 
       ! Recalculate gridbox average supersaturation.
+    do igroup = 1, NGROUP
       do iz = 1, NZ
         call supersat(carma, cstate, iz, igas, rc)
         if (rc < RC_OK) return

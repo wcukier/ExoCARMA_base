@@ -56,17 +56,17 @@ subroutine homnucgen(carma,cstate, iz, rc)
       if (igas .eq. igash2so4) then
         rho_cond = sulfate_density(carma, wtpct(iz), t(iz), rc)
       else ! WC 
-        rho_cond = carma%f_gas(igas)%f_rho_cond
+        rho_cond = carma%f_group(igroup)%f_rho_cond
       endif
 
       ! invert formula from setupgkern.f90
-      surftens = akelvin(iz,igas) * t(iz) * rho_cond * RGAS / (2._f * gwtmol(igas))
+      surftens = akelvin(iz,igroup) * t(iz) * rho_cond * RGAS / (2._f * gwtmol(igroup))
       rvap = RGAS / gwtmol_dif(igas)
       gc_cgs = gc(iz,igas) / (zmet(iz)*xmet(iz)*ymet(iz))
 
 
       ! a_c (Gao 2017 Eqn A.2)
-      agnuc = max(0._f,akelvin(iz,igas)/log(supsatl(iz,igas) + 1._f))
+      agnuc = max(0._f,akelvin(iz,igroup)/log(supsatl(iz,igroup) + 1._f))
 
       if (agnuc .eq. 0._f) then
         nucbin  = 0
@@ -81,7 +81,7 @@ subroutine homnucgen(carma,cstate, iz, rc)
 
         ! g (number of molecules in a particle with radius a_c)
         molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3._f &
-        / gwtmol(igas) * AVG
+        / gwtmol(igroup) * AVG
         
         cmass = 4._f / 3._f * PI * agnuc**3._f * rho_cond
 

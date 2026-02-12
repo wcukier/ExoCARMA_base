@@ -113,11 +113,11 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
                 !  Loop over particle bins.
                 do ibin = 1, NBIN
   
-                  ssi = supsati(iz,igas)
-                  ssl = supsatl(iz,igas)
+                  ssi = supsati(iz,igroup)
+                  ssl = supsatl(iz,igroup)
                   
                   ! Adjust ssi for the Kelvin effect.
-                  fkelvi = exp(akelvini(iz,igas) / r(ibin,igroup))
+                  fkelvi = exp(akelvini(iz,igroup) / r(ibin,igroup))
                   ssi = ssi / fkelvi
   
                   ! Calculate approximate critical saturation needed for homogeneous freezing
@@ -141,7 +141,7 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
   
                     ! Kelvin effect on water activity
                     aw    = 1._f + ssl                                                            ! ?
-                    fkelv = exp(akelvin(iz,igas) / r(ibin,igroup))
+                    fkelv = exp(akelvin(iz,igroup) / r(ibin,igroup))
                     aw    = aw / fkelv
 
                     ! Calculate volume ratio of wet/dry aerosols

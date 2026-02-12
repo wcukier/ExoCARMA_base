@@ -121,12 +121,12 @@ subroutine freezaerl_tabazadeh2000(carma, cstate, iz, rc)
                   ! which is not physicsal. With small supersaturations, the water activity 
                   ! becomes postive (>1.013) the weight percent becomes negative. Don't allow
                   ! the the supsatl to be greater than 0.
-                  ssl = max(-1.0_f, min(0._f, supsatl(iz,igas)))
+                  ssl = max(-1.0_f, min(0._f, supsatl(iz,igroup)))
                   
     
                   ! Homogeneous freezing of sulfate aerosols should only occur of SL < Scrit
                   ! and SI > <sifreeze>.
-                  if( supsati(iz,igas) .gt. sifreeze)then
+                  if( supsati(iz,igroup) .gt. sifreeze)then
     
                     ! Calculate mean ice density and latent heat of freezing over temperature
                     ! interval [T0,T]
@@ -144,7 +144,7 @@ subroutine freezaerl_tabazadeh2000(carma, cstate, iz, rc)
                     act = min(1.0_f, ssl + 1._f)
 
                     ! Kelvin effect on water activity
-                    fkelv = exp(akelvin(iz,igas) / r(ibin,igroup))                                ! ?
+                    fkelv = exp(akelvin(iz,igroup) / r(ibin,igroup))                                ! ?
                     act   = act / fkelv
 
                     IF(act .LT. 0.05_f) THEN
@@ -267,7 +267,7 @@ subroutine freezaerl_tabazadeh2000(carma, cstate, iz, rc)
                     sigsulice = abs( sigsula - sigicea )
         
                     ! Critical ice germ radius formed in the sulfate solution
-                    ag = 2._f*gwtmol(igas)*sigsulice / &
+                    ag = 2._f*gwtmol(igroup)*sigsulice / &
                           ( rlhbar * rhoibar * log(T0/t(iz)) + &
                           rhoibar * rgas * 0.5_f * (T0+t(iz)) * &
                          log(ssl+1._f) )

@@ -31,10 +31,12 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
   integer                              :: ielem   ! element index
   integer                              :: ibin    ! bin index
   integer                              :: igas    ! gas index
+  integer                              :: igroup    ! group index
+
   real(kind=f)                         :: previous_ice(NGAS)      ! total ice at the start of substep
   real(kind=f)                         :: previous_liquid(NGAS)   ! total liquid at the start of substep
-  real(kind=f)                         :: previous_supsatl(NGAS)  ! supersaturation wrt ice at the start of substep
-  real(kind=f)                         :: previous_supsati(NGAS)  ! supersaturation wrt liquid at the start of substep
+  real(kind=f)                         :: previous_supsatl(NGROUP)  ! supersaturation wrt ice at the start of substep
+  real(kind=f)                         :: previous_supsati(NGROUP)  ! supersaturation wrt liquid at the start of substep
   real(kind=f)                         :: supsatold
   real(kind=f)                         :: supsatnew
   real(kind=f)                         :: srat
@@ -74,16 +76,16 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
 
        
 
-    do igas = 1, NGAS
+    do igroup = 1, NGROUP
      ! write(*,*) igas, "before supersat"
-      call supersat(carma, cstate, iz, igas, rc)
+      call supersat(carma, cstate, iz, igroup, rc)
       !write(*,*) igas, "after supersat"
       if (rc < RC_OK) return
 
-      !write(*,*) igas, supsatl(iz,igas) 
+      !write(*,*) igas, supsatl(iz,igroup) 
     
-      previous_supsati(igas) = supsati(iz, igas)
-      previous_supsatl(igas) = supsatl(iz, igas)     
+      previous_supsati(igroup) = supsati(iz, igroup)
+      previous_supsatl(igroup) = supsatl(iz, igroup)     
     end do
     
     ! Have water vapor and sulfuric acid been defined?
@@ -211,10 +213,13 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
 
   !  Update saturation ratios
   if (do_grow .or. do_thermo) then
-    do igas = 1, NGAS
+    do igroup = 1, NGROUP
+      ielem = ienconc(igroup)     ! element of particle number concentration
+      igas = igrowgas(ielem) 
+
 
     !  write(*,*) "supersat again"
-      call supersat(carma, cstate, iz, igas, rc)
+      call supersat(carma, cstate, iz, igroup, rc)
       if (rc < RC_OK) return
 
      ! write(*,*) "done with supersat again"
@@ -222,11 +227,11 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
       ! Check to see how much the supersaturation changed during this step. If it
       ! has changed to much, then cause a retry.
       if (t(iz) >= 0._f) then
-        supsatold = previous_supsatl(igas)
-        supsatnew = supsatl(iz,igas)
+        supsatold = previous_supsatl(igroup)
+        supsatnew = supsatl(iz,igroup)
       else
-        supsatold = previous_supsati(igas)
-        supsatnew = supsati(iz,igas)
+        supsatold = previous_supsati(igroup)
+        supsatnew = supsati(iz,igroup)
       end if
 
       ! If ds_threshold is positive, then it indicates that the criteria should
@@ -253,17 +258,17 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
             if (do_substep) then
               if (nretries == maxretries) then 
                 if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-		              lat, lon, srat, previous_supsati(igas), previous_supsatl(igas), &
-                supsati(iz, igas), supsatl(iz,igas), t(iz)       
-                if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz, igas), &
-		              supsatlold(iz,igas), told(iz), d_gc(iz, igas), d_t(iz)
+		              lat, lon, srat, previous_supsati(igroup), previous_supsatl(igroup), &
+                supsati(iz, igroup), supsatl(iz,igroup), t(iz)       
+                if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz, igroup), &
+		              supsatlold(iz,igroup), told(iz), d_gc(iz, igas), d_t(iz)
               end if
               
               rc = RC_WARNING_RETRY
             else
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), &
 		              iz, lat, lon, gc(iz,igas), gasprod(igas), &
-                  supsati(iz, igas), supsatl(iz,igas), t(iz)
+                  supsati(iz, igroup), supsatl(iz,igroup), t(iz)
             end if
           end if
         end if
@@ -300,15 +305,15 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
           if (do_substep) then
             if (nretries == maxretries) then 
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-		              lat, lon, previous_supsati(igas), previous_supsatl(igas), &
-              	  supsati(iz, igas), supsatl(iz,igas), t(iz)
-              if (do_print) write(LUNOPRT,3) gcl(iz,igas), supsatiold(iz, igas), &
-	              	supsatlold(iz,igas), told(iz), d_gc(iz, igas), d_t(iz)
+		              lat, lon, previous_supsati(igroup), previous_supsatl(igroup), &
+              	  supsati(iz, igroup), supsatl(iz,igroup), t(iz)
+              if (do_print) write(LUNOPRT,3) gcl(iz,igas), supsatiold(iz, igroup), &
+	              	supsatlold(iz,igroup), told(iz), d_gc(iz, igas), d_t(iz)
             end if
           else
             if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
 		              lat, lon, gc(iz,igas), gasprod(igas), &
-              	  supsati(iz, igas), supsatl(iz,igas), t(iz)
+              	  supsati(iz, igroup), supsatl(iz,igroup), t(iz)
           end if
           
           rc = RC_WARNING_RETRY

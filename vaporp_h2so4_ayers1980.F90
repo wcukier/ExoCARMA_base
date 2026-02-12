@@ -15,7 +15,7 @@
 !!
 !! @author Mike Mills, Tianyi Fan
 !! @version Feb-2011
-subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
+subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, igroup, rc, pvap_liq, pvap_ice)
 !     types
   use carma_precision_mod
   use carma_enums_mod
@@ -32,6 +32,7 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   type(carma_type), intent(inout)      :: carma     !! the carma object
   type(carmastate_type), intent(inout) :: cstate    !! the carma state object
   integer, intent(in)                  :: iz        !! z index
+  integer, intent(in)                  :: igroup    !! group index
   real(kind=f), intent(out)            :: pvap_liq  !! vapor pressure wrt liquid [dyne/cm2]
   real(kind=f), intent(out)            :: pvap_ice  !! vapor pressure wrt ice [dyne[cm2]
   integer, intent(inout)               :: rc        !! return code, negative indicates failure
@@ -61,7 +62,7 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
 
   ! Compute the sulfate composition based on Hanson parameterization
   ! to temperature and water vapor concentration.
-  wtpct(iz) = wtpct_tabaz(carma, temp, gc_cgs, pvapl(iz, igash2o), rc)
+  wtpct(iz) = wtpct_tabaz(carma, temp, gc_cgs, pvapl(iz, igroup), rc)
 
   ! Parameterized fit to Giauque's (1959) enthalpies v. wt %:
   en = 4.184_f * (23624.8_f - 1.14208e8_f / ((wtpct(iz) - 105.318_f)**2 + 4798.69_f))
