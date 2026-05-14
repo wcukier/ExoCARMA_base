@@ -158,7 +158,7 @@ subroutine vertadv(carma, cstate, vtrans, cvert, itbnd, ibbnd, cvert_tbnd, cvert
     enddo
   
     do k = 1,NZ-1
-      com2  = ( dz(k) + dz(k+1) ) / 2._f
+      com2  = ( dz(k) + dz(k+1) ) / 2._f !TODO WC should this just be dz(k)?
       x = vtrans(k+1)*dtime/dz(k)
       xpos = abs(x)
   

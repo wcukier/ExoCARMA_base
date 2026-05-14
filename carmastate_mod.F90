@@ -93,7 +93,7 @@ contains
   !! @see CARMASTATE_Destroy
   subroutine CARMASTATE_Create(cstate, carma_ptr, time, dtime, NZ, igridv, &
       igridh, lat, lon, xc, dx, yc, dy, zc, zl, p, pl, t, wtmol_air, grav, &
-      rplanet, rmu_0, rmu_t0, rmu_c, thcond_0, thcond_1, thcond_2, CP, & ! WC
+      rplanet, rmu_1, rmu_2, rmu_3, rmu_4, thcond_0, thcond_1, thcond_2, CP, & ! WC
       rc, qh2o, relhum, told, radint, winds, ekz, ftopp, fbotp, & 
       pctop, pcbot, gctop, gcbot, ftopg, fbotg, met, t0, prod, prodgas & !PETER
       )       
@@ -118,9 +118,10 @@ contains
     real(kind=f), intent(in)                :: wtmol_air(NZ)       !! Molecular weight of atmosphere [g/mol]
     real(kind=f), intent(in)                :: grav(NZ)       !! Gravitational acceleration [g/cm2]
     real(kind=f), intent(in)                :: rplanet       !! Planetary radius [cm]
-    real(kind=f), intent(in)                :: rmu_0         !! WC: Viscosoty Scaling term [Poise]
-    real(kind=f), intent(in)                :: rmu_t0        !! WC: Viscosity reference temp [K]
-    real(kind=f), intent(in)                :: rmu_c         !! WC: Viscosity Sutherland constant [K]
+    real(kind=f), intent(in)                :: rmu_1         !! WC: Viscosoty Scaling term [Poise / K^rmu_2]
+    real(kind=f), intent(in)                :: rmu_2         !! WC: Viscosity exponent [dimentionless]
+    real(kind=f), intent(in)                :: rmu_3         !! WC: Viscosity linear term [K]
+    real(kind=f), intent(in)                :: rmu_4         !! WC: Viscosity quadratic term [K^2]
     real(kind=f), intent(in)                :: thcond_0      !! WC: Constant thermal conductivity term [ergs/s/cm/K]
     real(kind=f), intent(in)                :: thcond_1      !! WC: Coefficient to linear thermal conductivity term [ergs/s/cm/K^2]
     real(kind=f), intent(in)                :: thcond_2      !! WC: Coefficient to quadratic thermal conductivity term [ergs/s/cm/K^3]
@@ -291,9 +292,10 @@ contains
     end if
     
     ! Atmospheric viscosity and thermal conductivity - WC
-    cstate%f_rmu_0      = rmu_0
-    cstate%f_rmu_t0     = rmu_t0
-    cstate%f_rmu_c      = rmu_c
+    cstate%f_rmu_1      = rmu_1
+    cstate%f_rmu_2      = rmu_2
+    cstate%f_rmu_3      = rmu_3
+    cstate%f_rmu_4      = rmu_4
     cstate%f_thcond_0   = thcond_0
     cstate%f_thcond_1   = thcond_1
     cstate%f_thcond_2   = thcond_2
@@ -334,7 +336,7 @@ contains
   !! @see CARMASTATE_Destroy
   subroutine CARMASTATE_CreateFromReference(cstate, carma_ptr, time, dtime, NZ,&
     igridv, igridh,lat, lon, xc, dx, yc, dy, zc, zl, p, pl, t, wtmol_air, &
-    grav, rplanet, rmu_0, rmu_t0, rmu_c, thcond_0, thcond_1, thcond_2, CP, rc, & ! WC
+    grav, rplanet, rmu_1, rmu_2, rmu_3, rmu_4, thcond_0, thcond_1, thcond_2, CP, rc, & ! WC
      qh2o, relhum, winds, ekz, met,t0) 				!PETER 
     type(carmastate_type), intent(inout)    :: cstate      !! the carma state object
     type(carma_type), pointer, intent(in)   :: carma_ptr   !! (in) the carma object
@@ -357,9 +359,10 @@ contains
     real(kind=f), intent(in)                :: wtmol_air(NZ)       !! Molecular weight of atmosphere [g/mol]
     real(kind=f), intent(in)                :: grav(NZ)       !! Gravitatinal acceleration [g/cm2]
     real(kind=f), intent(in)                :: rplanet       !! Planetary radius [cm]
-    real(kind=f), intent(in)                :: rmu_0         !! WC: Viscosoty Scaling term [Poise]
-    real(kind=f), intent(in)                :: rmu_t0        !! WC: Viscosity reference temp [K]
-    real(kind=f), intent(in)                :: rmu_c         !! WC: Viscosity Sutherland constant [K]
+    real(kind=f), intent(in)                :: rmu_1         !! WC: Viscosoty Scaling term [Poise / K^rmu_2]
+    real(kind=f), intent(in)                :: rmu_2         !! WC: Viscosity exponent [K]
+    real(kind=f), intent(in)                :: rmu_3         !! WC: Viscosity linear term [K]
+    real(kind=f), intent(in)                :: rmu_4         !! WC: Viscosity quadratic term [K^2]
     real(kind=f), intent(in)                :: thcond_0      !! WC: Constant thermal conductivity term [ergs/s/cm/K]
     real(kind=f), intent(in)                :: thcond_1      !! WC: Coefficient to linear thermal conductivity term [ergs/s/cm/K^2]
     real(kind=f), intent(in)                :: thcond_2      !! WC: Coefficient to quadratic thermal conductivity term [ergs/s/cm/K^3]
@@ -404,9 +407,10 @@ contains
     cstate%f_lon  = lon
     
     ! Atmospheric viscosity and thermal conductivity - WC
-    cstate%f_rmu_0      = rmu_0
-    cstate%f_rmu_t0     = rmu_t0
-    cstate%f_rmu_c      = rmu_c
+    cstate%f_rmu_1      = rmu_1
+    cstate%f_rmu_2      = rmu_2
+    cstate%f_rmu_3      = rmu_3
+    cstate%f_rmu_4      = rmu_4
     cstate%f_thcond_0   = thcond_0
     cstate%f_thcond_1   = thcond_1
     cstate%f_thcond_2   = thcond_2

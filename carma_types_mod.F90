@@ -814,9 +814,10 @@ module carma_types_mod
     !  told      Temperature at beginning of time-step
     !  relhum    Hacked in relative humidity from hostmodel
     !  wtpct     Sulfate weight percent
-    !  rmu_0     Viscosoty scaling term [Poise]
-    !  rmu_t0    Viscosity reference temp [K]
-    !  rmu_c     Viscosity Sutherland constant [K]
+    !  rmu_1     Viscosoty scaling term [Poise / K^rmu_2]
+    !  rmu_2     Viscosity exponent [dimentionless]
+    !  rmu_3     Viscosity linear term [K]
+    !  rmu_4     Viscosity quadratic term [K^2]
     !  thcond_0  Consant thermal conductivity term [ergs/s/cm/K]
     !  thcond_1  Coefficient to linear thermal conductivity term [ergs/s/cm/K^2]
     !  thcond_2  Coefficient to quadratic thermal conductivity term [ergs/s/cm/K^3]
@@ -836,9 +837,10 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_grav      ! (NZ)
     real(kind=f)                                :: f_met    
     real(kind=f)                                :: f_t0    
-    real(kind=f)                                :: f_rmu_0  !WC 
-    real(kind=f)                                :: f_rmu_c      !WC
-    real(kind=f)                                :: f_rmu_t0     !WC
+    real(kind=f)                                :: f_rmu_1  !WC 
+    real(kind=f)                                :: f_rmu_2      !WC
+    real(kind=f)                                :: f_rmu_3     !WC
+    real(kind=f)                                :: f_rmu_4     !WC
     real(kind=f)                                :: f_thcond_0  !WC 
     real(kind=f)                                :: f_thcond_1     !WC
     real(kind=f)                                :: f_thcond_2     !WC

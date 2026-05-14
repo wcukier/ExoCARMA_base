@@ -230,9 +230,10 @@
 #define ekz           cstate%f_ekz
 #define met           cstate%f_met
 #define t0            cstate%f_t0
-#define rmu_0         cstate%f_rmu_0
-#define rmu_t0        cstate%f_rmu_t0
-#define rmu_c         cstate%f_rmu_c
+#define rmu_1         cstate%f_rmu_1
+#define rmu_2         cstate%f_rmu_2
+#define rmu_3         cstate%f_rmu_3
+#define rmu_4         cstate%f_rmu_4
 #define thcond_0      cstate%f_thcond_0
 #define thcond_1      cstate%f_thcond_1
 #define thcond_2      cstate%f_thcond_2
