@@ -97,6 +97,7 @@ module carma_types_mod
     real(kind=f)                                :: f_surften_slope ! WC
     real(kind=f)                                :: f_coldia        ! WC
     real(kind=f)                                :: f_lat_heat_e    ! WC
+    real(kind=f)                                :: f_desorption    ! WC: user-specified desorption energy [eV], -1 = auto
     integer                                     :: f_is_type3      ! WC
     real(kind=f)                                :: f_vp_offset     ! WC
     real(kind=f)                                :: f_vp_tcoeff     ! WC

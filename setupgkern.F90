@@ -141,7 +141,11 @@ subroutine setupgkern(carma, cstate, rc)
         akelvin(k, igas) = 2._f * gwtmol(igas) * surf_tens(k) / (t(k) * rho_cond * RGAS)
         surfacetens(k, igas) = surf_tens(k)
         
-        desorption(igas) = 0.5_f
+        if (carma%f_gas(igas)%f_desorption .gt. 0._f) then
+          desorption(igas) = carma%f_gas(igas)%f_desorption
+        else
+          desorption(igas) = 0.5_f * rlhe(k,igas) * gwtmol_dif(igas) / AVG / EV2ERG
+        end if
         
         ! Not doing condensation on ice, so just set it to the value
         ! for vapor.

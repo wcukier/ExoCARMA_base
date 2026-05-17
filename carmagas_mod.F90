@@ -36,7 +36,7 @@ contains
   subroutine CARMAGAS_Create(carma, igas, name, wtmol, ivaprtn, icomposition,  &
     rho_cond, surften_0, coldia,  vp_offset, vp_tcoeff, rc,&
     is_type3,  surften_slope, vp_metcoeff, vp_logpcoeff, shortname, &
-    dgc_threshold, ds_threshold, wtmol_dif, lat_heat_e, stofact)
+    dgc_threshold, ds_threshold, wtmol_dif, lat_heat_e, stofact, desorption)
     type(carma_type), intent(inout)       :: carma           !! the carma object
     integer, intent(in)                   :: igas            !! the gas index
     character(*), intent(in)              :: name            !! the gas name, maximum of 255 characters
@@ -59,6 +59,7 @@ contains
     real(kind=f), optional, intent(in)    :: wtmol_dif       !! gas molecular weight in vapor phase [g/mol]
     real(kind=f), optional, intent(in)    :: lat_heat_e      !! Latent heat of evaporation [cm^2/s^2] WC
     integer, optional, intent(in)         :: stofact         !! stoichiometry factor between gas phase and condensate WC
+    real(kind=f), optional, intent(in)    :: desorption      !! Desorption energy [eV]; if -1 (default), computed as 0.5 * lat_heat_e per molecule WC
 
 
     write(*, *) ivaprtn
@@ -97,6 +98,7 @@ contains
     carma%f_gas(igas)%f_vp_logpcoeff    = 0._f
     carma%f_gas(igas)%f_lat_heat_e      = -1.0_f
     carma%f_gas(igas)%f_stofact         = 1
+    carma%f_gas(igas)%f_desorption      = -1.0_f
 
     ! Set optional parameters.
     if (present(shortname))     carma%f_gas(igas)%f_shortname       = shortname
@@ -109,6 +111,7 @@ contains
     if (present(vp_logpcoeff))  carma%f_gas(igas)%f_vp_logpcoeff    = vp_logpcoeff
     if (present(lat_heat_e))    carma%f_gas(igas)%f_lat_heat_e      = lat_heat_e
     if (present(stofact))       carma%f_gas(igas)%f_stofact         = stofact
+    if (present(desorption))    carma%f_gas(igas)%f_desorption      = desorption
 
 
 
