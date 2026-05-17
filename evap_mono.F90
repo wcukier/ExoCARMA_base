@@ -50,35 +50,35 @@ subroutine evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   conserve_mass = .true.
 
   ! Set automatic flag for total evaporation used in gasexchange()
-  totevap(ibin,ig) = .true.
+  totevap(ibin,ig,iz) = .true.
 
   ! Possibly put all of core mass into largest, smallest, or
   ! smallest nucelated CN bin 
-  if( too_big .or. too_small .or. nuc_small )then
+  if( too_big(iz) .or. too_small(iz) .or. nuc_small(iz) )then
 
-    if( too_big )then
+    if( too_big(iz) )then
       jbin = NBIN
-    elseif( too_small )then
+    elseif( too_small(iz) )then
       jbin = 1
     else
       jbin = 1
     endif
 
     if( conserve_mass )then
-      factor = coreavg/rmass(jbin,igto)
+      factor = coreavg(iz)/rmass(jbin,igto)
     else
       factor = ONE
     endif
 
     ! First the CN number concentration element
-    evappe(jbin,ieto) = evappe(jbin,ieto) + factor*evdrop
+    evappe(jbin,ieto,iz) = evappe(jbin,ieto,iz) + factor*evdrop(iz)
 
     ! Now the CN cores
     do ic = 2, ncore(ig)
       iecore = icorelem(ic,ig)
       ie2cn  = ievp2elem(iecore)
-      evappe(jbin,ie2cn) = evappe(jbin,ie2cn) + &
-        factor*evcore(ic)*rmass(jbin,igto)
+      evappe(jbin,ie2cn,iz) = evappe(jbin,ie2cn,iz) + &
+        factor*evcore(ic,iz)*rmass(jbin,igto)
     enddo
   else
 
@@ -90,21 +90,21 @@ subroutine evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
       return
     endif
 
-    fracmass = ( rmass(iavg,igto) - coreavg ) / diffmass(iavg,igto,iavg-1,igto)
+    fracmass = ( rmass(iavg,igto) - coreavg(iz) ) / diffmass(iavg,igto,iavg-1,igto)
 !    fracmass = max( 0._f, min( ONE, fracmass ) )
-  
+
     ! First the CN number concentration element
-    evappe(iavg-1,ieto) = evappe(iavg-1,ieto) + evdrop*fracmass
-    evappe(iavg,ieto) = evappe(iavg,ieto) + evdrop*( ONE - fracmass )
-  
+    evappe(iavg-1,ieto,iz) = evappe(iavg-1,ieto,iz) + evdrop(iz)*fracmass
+    evappe(iavg,ieto,iz) = evappe(iavg,ieto,iz) + evdrop(iz)*( ONE - fracmass )
+
     ! Now the cores
     do ic = 2, ncore(ig)
       iecore = icorelem(ic,ig)
       ie2cn  = ievp2elem(iecore)
-      evappe(iavg-1,ie2cn) = evappe(iavg-1,ie2cn) + &
-          rmass(iavg-1,igto)*evcore(ic)*fracmass
-      evappe(iavg,ie2cn) = evappe(iavg,ie2cn) + &
-          rmass(iavg,igto)*evcore(ic)*( ONE - fracmass )
+      evappe(iavg-1,ie2cn,iz) = evappe(iavg-1,ie2cn,iz) + &
+          rmass(iavg-1,igto)*evcore(ic,iz)*fracmass
+      evappe(iavg,ie2cn,iz) = evappe(iavg,ie2cn,iz) + &
+          rmass(iavg,igto)*evcore(ic,iz)*( ONE - fracmass )
     enddo
   endif
 

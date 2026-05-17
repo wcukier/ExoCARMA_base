@@ -169,7 +169,7 @@ subroutine freezaerl_mohler2010(carma, cstate, iz, rc)
                     endif
   
                     ! NOTE: Limit the rate for stability.
-                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) &
+                    rnuclg(ibin,igroup,ignucto,iz) = rnuclg(ibin,igroup,ignucto,iz) &
 			+ min(1e20_f, rjj * volrat * vol(ibin,igroup))                 ! [s-1]
                  endif   ! ssi > sifreeze .and. target droplets not evaporating
                 enddo    ! ibin = 1,NBIN

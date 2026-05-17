@@ -103,7 +103,7 @@ subroutine upgxfer(carma, cstate, iz, ibin, ielem, rc)
         ! Bypass calculation if few source particles are present 
         if( pconmax(iz,igfrom) .gt. FEW_PC )then
 
-          if( rnuclg(ifrom,igfrom,igroup) .gt. 0._f )then
+          if( rnuclg(ifrom,igfrom,igroup,iz) .gt. 0._f )then
 
             ! First calculate mass associated with the source element <elemass>
             ! (this is <rmass> for all source elements except particle number
@@ -124,10 +124,10 @@ subroutine upgxfer(carma, cstate, iz, ibin, ielem, rc)
               elemass  = fracmass * rmass(ifrom,igfrom)
             endif
 
-            rnucprod = rnuclg(ifrom,igfrom,igroup) * &
+            rnucprod = rnuclg(ifrom,igfrom,igroup,iz) * &
                     pc(iz,ifrom,iefrom) * elemass**ipow
 
-            rnucpe(ibin,ielem) = rnucpe(ibin,ielem) + rnucprod
+            rnucpe(ibin,ielem,iz) = rnucpe(ibin,ielem,iz) + rnucprod
           !write(*,*) iz,ibin,ielem,ipow,rnucpe(ibin,ielem)
 
             ! Calculate latent heat associated with nucleation to <ibin,ielem>

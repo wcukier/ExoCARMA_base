@@ -61,7 +61,7 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   ! described by Turco (NASA Technical Paper 1362).
   !  
   ! Set automatic flag for total evaporation used in gasexchange()
-  totevap(ibin,ig) = .true.
+  totevap(ibin,ig,iz) = .true.
   
   ! Calculate number <rn_norms,rn_norml> and mass <rm_norms,rm_norml>
   ! normalization factors for cores smaller and larger than <rmass(m,igto)>.
@@ -78,8 +78,8 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
     dmto = dm(ito,igto)
 
     ! <prob> is probability that core mass is in CN bin <ito>.
-    if( coreavg .gt. 0._f .and. coresig .gt. 0._f )then
-       expon = -log( rmassto/coreavg )**2 / ( 2.*coresig )
+    if( coreavg(iz) .gt. 0._f .and. coresig(iz) .gt. 0._f )then
+       expon = -log( rmassto/coreavg(iz) )**2 / ( 2.*coresig(iz) )
        expon = max(-POWMAX, expon)
     else
       expon = 0._f
@@ -107,7 +107,7 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
   else
     rm_norms = rm_norms/rn_norms
     rm_norml = rm_norml/rn_norml
-    weightl = (coreavg - rm_norms) / (rm_norml - rm_norms)
+    weightl = (coreavg(iz) - rm_norms) / (rm_norml - rm_norms)
     if( weightl .gt. ALMOST_ONE )then
       weightl = ONE
     elseif( weightl .lt. ALMOST_ZERO )then
@@ -129,14 +129,14 @@ subroutine evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
     endif
     
     ! First the CN number concentration element
-    evappe(ito,ieto) = evappe(ito,ieto) + evdrop*prob(ito)*dm(ito,igto)
-  
+    evappe(ito,ieto,iz) = evappe(ito,ieto,iz) + evdrop(iz)*prob(ito)*dm(ito,igto)
+
     ! Now the CN core elements
     do ic = 2, ncore(ig)
       iecore = icorelem(ic,ig)
       ie2cn  = ievp2elem(iecore)
-      evappe(ito,ie2cn) = evappe(ito,ie2cn) + &
-        rmass(ito,igto)*evcore(ic)*prob(ito)*dm(ito,igto)
+      evappe(ito,ie2cn,iz) = evappe(ito,ie2cn,iz) + &
+        rmass(ito,igto)*evcore(ic,iz)*prob(ito)*dm(ito,igto)
     enddo
   enddo
  

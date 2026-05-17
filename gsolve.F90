@@ -6,7 +6,7 @@
 !!
 !! @author Andy Ackerman, Bill McKie, Chuck Bardeen
 !! @version Dec-1995, Sep-1997, Nov-2009
-subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
+subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in, nretries_in)
 
   ! types
   use carma_precision_mod
@@ -26,6 +26,8 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
   real(kind=f), intent(in)             :: previous_ice(NGAS)      !! total ice at the start of substep
   real(kind=f), intent(in)             :: previous_liquid(NGAS)   !! total liquid at the start of substep
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
+  real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
 
   ! Local Variables
   integer                              :: igas    !! gas index
@@ -62,22 +64,22 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
     !
     ! This is because in the old scheme, the particles were solved for implicitly, but the
     ! gas and latent heat were solved for explicitly using the same rates.
-    gasprod(igas) = ((previous_ice(igas) - total_ice(igas)) + &
-		                  (previous_liquid(igas) - total_liquid(igas))) / dtime
-    rlprod        = rlprod - ((previous_ice(igas) - total_ice(igas)) * &
+    gasprod(igas,iz) = ((previous_ice(igas) - total_ice(igas)) + &
+		                  (previous_liquid(igas) - total_liquid(igas))) / dtime_in
+    rlprod(iz)    = rlprod(iz) - ((previous_ice(igas) - total_ice(igas)) * &
 		                  (rlhe(iz,igas) + rlhm(iz,igas)) + &
                       (previous_liquid(igas) - total_liquid(igas)) * &
-		                  (rlhe(iz,igas))) / (CP * rhoa(iz) * dtime) 
+		                  (rlhe(iz,igas))) / (CP * rhoa(iz) * dtime_in)
 
     gc_old = gc(iz,igas)
 
     ! Don't let the gas concentration go negative.
-    gc(iz,igas) = gc(iz,igas) + dtime * (gasprod(igas)*stofact + phochemprod_gas(iz,igas))
+    gc(iz,igas) = gc(iz,igas) + dtime_in * (gasprod(igas,iz)*stofact + phochemprod_gas(iz,igas))
     
 
     if (gc(iz,igas) < 0.0_f) then
       if (do_substep) then
-        if (nretries == maxretries) then 
+        if (nretries_in == maxretries) then 
           !if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
           !      lat, lon, gc(iz,igas), gasprod(igas), &
           !      supsati(iz,igas), supsatl(iz,igas), t(iz)
@@ -93,7 +95,7 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
         endif
       else
         if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-                lat, lon, gc(iz,igas), gasprod(igas), &
+                lat, lon, gc(iz,igas), gasprod(igas,iz), &
                 supsati(iz, igas), supsatl(iz,igas), t(iz)
         rc = RC_WARNING_RETRY
       end if
@@ -107,17 +109,17 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
     ! cloud fraction since the cloud mass has been scaled by the cloud fraction.
     
     if (gc_threshold /= 0._f) then
-      if ((dtime * gasprod(igas) / gc(iz,igas)) > gc_threshold) then
+      if ((dtime_in * gasprod(igas,iz) / gc(iz,igas)) > gc_threshold) then
         if (do_substep) then
-          if (nretries == maxretries) then 
+          if (nretries_in == maxretries) then
             if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &
-              lat, lon, dtime * gasprod(igas) / gc(iz,igas)
+              lat, lon, dtime_in * gasprod(igas,iz) / gc(iz,igas)
             if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
               supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
           end if
         else
           if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &
-		        lat, lon, dtime * gasprod(igas) / gc(iz,igas)
+		        lat, lon, dtime_in * gasprod(igas,iz) / gc(iz,igas)
         end if
   
         rc = RC_WARNING_RETRY

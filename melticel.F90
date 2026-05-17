@@ -62,7 +62,7 @@ subroutine melticel(carma, cstate, iz, rc)
   
               ! Temporary simple kludge: Set <rnuclg> to 1.e2 if T > 0C
               if( t(iz) .gt. T0 ) then
-                rnuclg(ibin,igroup,ignucto) = 1.e2_f
+                rnuclg(ibin,igroup,ignucto,iz) = 1.e2_f
               endif
             endif   ! pconmax(ixyz,igroup) .gt. FEW_PC
           enddo      ! ibin = 1,NBIN

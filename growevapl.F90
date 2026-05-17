@@ -11,7 +11,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Dec-1995
-subroutine growevapl(carma, cstate, iz, rc)
+subroutine growevapl(carma, cstate, iz, rc, dtime_in)
 
   ! types
   use carma_precision_mod
@@ -29,6 +29,7 @@ subroutine growevapl(carma, cstate, iz, rc)
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
 
   ! Local declarations
   integer                        :: igroup
@@ -93,7 +94,7 @@ subroutine growevapl(carma, cstate, iz, rc)
         do ibin = 1,NBIN-1
           ! Determine the growth rate (dmdt). This calculation may take into account
           ! radiative effects on the particle which can affect the growth rates.
-          call pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt(ibin), rc)
+          call pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt(ibin), rc, dtime_in)
         enddo     ! ibin = 1,NBIN-1
 
         ! Now calculate condensation/evaporation production and loss rates.
@@ -211,40 +212,40 @@ subroutine growevapl(carma, cstate, iz, rc)
 
         do ibin = 1,NBIN-1
 
-          !write(*,*) iz, ibin, igroup, dmdt(ibin)*dtime/dm(ibin,igroup)
+          !write(*,*) iz, ibin, igroup, dmdt(ibin)*dtime_in/dm(ibin,igroup)
 
           if( dmdt(ibin) .gt. 0._f .and. &
               pc(iz,ibin,iepart) .gt. SMALL_PC )then
 
-            x = dmdt(ibin)*dtime/dm(ibin,igroup)
+            x = dmdt(ibin)*dtime_in/dm(ibin,igroup)
 
             if( x .lt. 1._f )then
-              growlg(ibin,igroup) = (dmdt(ibin)/pc(iz,ibin,iepart) &
+              growlg(ibin,igroup,iz) = (dmdt(ibin)/pc(iz,ibin,iepart) &
                        * ( ar(ibin) - 0.5*dela(ibin)*x + &
                        (x/2._f - x**2/3._f)*a6(ibin) ))! * redugrow(igas)
             else
-              growlg(ibin,igroup) = dmdt(ibin) / dm(ibin,igroup)! * redugrow(igas)
+              growlg(ibin,igroup,iz) = dmdt(ibin) / dm(ibin,igroup)! * redugrow(igas)
             endif
 
           elseif( dmdt(ibin) .lt. 0._f .and. &
               pc(iz,ibin+1,iepart) .gt. SMALL_PC )then
 
-            x = -dmdt(ibin)*dtime/dm(ibin+1,igroup)
+            x = -dmdt(ibin)*dtime_in/dm(ibin+1,igroup)
 
             if( x .lt. 1._f )then
-              evaplg(ibin+1,igroup) = -dmdt(ibin)/ &
+              evaplg(ibin+1,igroup,iz) = -dmdt(ibin)/ &
                       pc(iz,ibin+1,iepart) &
                       * ( al(ibin+1) + 0.5_f*dela(ibin+1)*x + &
                       (x/2._f - (x**2)/3._f)*a6(ibin+1) )! * redugrow(igas)
             else
-              evaplg(ibin+1,igroup) = -dmdt(ibin) / dm(ibin+1,igroup)! * redugrow(igas)
+              evaplg(ibin+1,igroup,iz) = -dmdt(ibin) / dm(ibin+1,igroup)! * redugrow(igas)
             endif
 
-            ! Boundary conditions: for evaporation out of first bin (with cores), 
+            ! Boundary conditions: for evaporation out of first bin (with cores),
             ! use evaporation rate from second bin.
 !            if( ibin .eq. 1 .and. ncore(igroup) .gt. 0 )then
             if( ibin .eq. 1)then
-              evaplg(1,igroup) = -dmdt(1) / dm(1,igroup)! * redugrow(igas)
+              evaplg(1,igroup,iz) = -dmdt(1) / dm(1,igroup)! * redugrow(igas)
 	      !write(*,*) 'growevapl', evaplg(1,igroup), iz, igas, igroup
             endif
           endif

@@ -23,7 +23,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Oct-1997
-subroutine tsolve(carma, cstate, iz, rc)
+subroutine tsolve(carma, cstate, iz, rc, dtime_in, nretries_in)
 
   ! types
   use carma_precision_mod
@@ -41,7 +41,9 @@ subroutine tsolve(carma, cstate, iz, rc)
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
-  
+  real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
+  real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
+
   1 format(/,'tsolve::ERROR - negative temperature for : iz=',i4,',lat=',&
               f7.2,',lon=',f7.2,',T=',e10.3,',dT=',e10.3,',t_old=',e10.3,',d_gc=',e10.3,',dT_adv=',e10.3)
   2 format(/,'tsolve::ERROR - temperature change to large for : iz=',i4,',lat=',&
@@ -63,8 +65,8 @@ subroutine tsolve(carma, cstate, iz, rc)
   !
   ! NOTE: Radiative heating by the particles is handled by the parent model, so
   ! that term does not need to be added here.
-  dt         = dtime * rlprod
-  rlheat(iz) = rlheat(iz) + rlprod * dtime   
+  dt         = dtime_in * rlprod(iz)
+  rlheat(iz) = rlheat(iz) + rlprod(iz) * dtime_in   
   
   ! With particle heating, you must also include the impact of heat
   ! conduction from the particle
@@ -72,8 +74,8 @@ subroutine tsolve(carma, cstate, iz, rc)
   ! NOTE: We are ignoring the energy to heat the particle, since we
   ! are not tracking the particle temperature. Thus ...
   if (do_pheatatm) then
-    dt           = dt + dtime * phprod
-    partheat(iz) = partheat(iz) + phprod * dtime
+    dt           = dt + dtime_in * phprod(iz)
+    partheat(iz) = partheat(iz) + phprod(iz) * dtime_in
   end if
   
   t(iz) = t(iz) + dt
@@ -82,7 +84,7 @@ subroutine tsolve(carma, cstate, iz, rc)
   ! Don't let the temperature go negative.
   if (t(iz) < 0._f) then
     if (do_substep) then
-      if (nretries == maxretries) then 
+      if (nretries_in == maxretries) then 
       if (do_print) write(LUNOPRT,1) iz, &
 	lat, lon, t(iz), dt, told(iz), d_gc(iz, 1), d_t(iz)
       end if
@@ -106,13 +108,13 @@ subroutine tsolve(carma, cstate, iz, rc)
   if (t_threshold /= 0._f) then
     if (abs(abs(dt)) > t_threshold) then
       if (do_substep) then
-        if (nretries == maxretries) then 
+        if (nretries_in == maxretries) then 
           if (do_print) write(LUNOPRT,2) iz, lat, lon, t(iz), &
-		rlprod*dtime, dtime*partheat(iz), told(iz), d_gc(iz, 1), d_t(iz)
+		rlprod(iz)*dtime_in, dtime_in*partheat(iz), told(iz), d_gc(iz, 1), d_t(iz)
         end if
       else
         if (do_print) write(LUNOPRT,3) iz, lat, lon, t(iz),&
-		rlprod*dtime, dtime*partheat(iz), told(iz)
+		rlprod(iz)*dtime_in, dtime_in*partheat(iz), told(iz)
       end if
   
       rc = RC_WARNING_RETRY

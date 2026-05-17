@@ -793,17 +793,18 @@ contains
           !cstate%f_surfcond(NZ,NGAS), &
           !cstate%f_curvfact(NZ,NBIN,NGROUP,NGAS), &
           !cstate%f_zv(NZ,NBIN,NGROUP,NGAS), &
-          cstate%f_rnuclg(NBIN,NGROUP,NGROUP),&
-          cstate%f_rhompe(NBIN,NELEM), &
-          cstate%f_rnucpe(NBIN,NELEM), &
-          cstate%f_rnucpeup(NBIN,NELEM), &		!PETER
+          cstate%f_rnuclg(NBIN,NGROUP,NGROUP,NZ),&
+          cstate%f_rnuclgsum(NBIN,NGROUP,NZ),&
+          cstate%f_rhompe(NBIN,NELEM,NZ), &
+          cstate%f_rnucpe(NBIN,NELEM,NZ), &
+          cstate%f_rnucpeup(NBIN,NELEM,NZ), &		!PETER
           cstate%f_pc_nucl(NZ,NBIN,NELEM), &
-          cstate%f_growpe(NBIN,NELEM), &
-          cstate%f_evappe(NBIN,NELEM), &
-          cstate%f_evcore(NELEM), &
-          cstate%f_growlg(NBIN,NGROUP), &
-          cstate%f_evaplg(NBIN,NGROUP), &
-          cstate%f_redugrow(NGAS), &
+          cstate%f_growpe(NBIN,NELEM,NZ), &
+          cstate%f_evappe(NBIN,NELEM,NZ), &
+          cstate%f_evcore(NELEM,NZ), &
+          cstate%f_growlg(NBIN,NGROUP,NZ), &
+          cstate%f_evaplg(NBIN,NGROUP,NZ), &
+          cstate%f_redugrow(NGAS,NZ), &
           cstate%f_gasprod_tot(NZ,NGAS), &                     !PETER
           cstate%f_rnucpeup_tot(NZ,NBIN,NELEM), &               !PETER
           cstate%f_rhompe_tot(NZ,NBIN,NELEM), &                 !PETER
@@ -813,15 +814,23 @@ contains
           cstate%f_evaplg_tot(NZ,NBIN,NGROUP), &                 !PETER
           cstate%f_rnucpe_tot(NZ,NBIN,NELEM), &               !PETER
           cstate%f_evappe_tot(NZ,NBIN,NELEM), &                 !PETER
-          cstate%f_gasprod(NGAS), &
+          cstate%f_gasprod(NGAS,NZ), &
+          cstate%f_phprod(NZ), &
+          cstate%f_coreavg(NZ), &
+          cstate%f_coresig(NZ), &
+          cstate%f_evdrop(NZ), &
+          cstate%f_rlprod(NZ), &
+          cstate%f_too_small(NZ), &
+          cstate%f_too_big(NZ), &
+          cstate%f_nuc_small(NZ), &
           cstate%f_phochemprod(NZ,NBIN,NELEM), &
           cstate%f_phochemprod_gas(NZ,NGAS), &
           cstate%f_rlheat(NZ), &
           cstate%f_radint(NZ,NWAVE), &
           cstate%f_partheat(NZ), &
           cstate%f_dtpart(NZ,NBIN,NGROUP), &
-          cstate%f_cmf(NBIN,NGROUP), &
-          cstate%f_totevap(NBIN,NGROUP), &
+          cstate%f_cmf(NBIN,NGROUP,NZ), &
+          cstate%f_totevap(NBIN,NGROUP,NZ), &
           stat=ier)
         if (ier /= 0) then
           if (cstate%f_carma%f_do_print) write(cstate%f_carma%f_LUNOPRT, *) &
@@ -1007,6 +1016,7 @@ contains
           !cstate%f_curvfact, &
           !cstate%f_zv, &
           cstate%f_rnuclg,&
+          cstate%f_rnuclgsum,&
           cstate%f_rnucpe, &
           cstate%f_rnucpeup, &		!PETER
           cstate%f_rhompe, &
@@ -1018,6 +1028,14 @@ contains
           cstate%f_evaplg, &
           cstate%f_redugrow, &
           cstate%f_gasprod, &
+          cstate%f_phprod, &
+          cstate%f_coreavg, &
+          cstate%f_coresig, &
+          cstate%f_evdrop, &
+          cstate%f_rlprod, &
+          cstate%f_too_small, &
+          cstate%f_too_big, &
+          cstate%f_nuc_small, &
           cstate%f_gasprod_tot, &                     !PETER
           cstate%f_rnucpeup_tot, &               !PETER
           cstate%f_rhompe_tot, &                 !PETER

@@ -7,7 +7,7 @@
 !! @author Eric Jensen, Bill McKie
 !! @version Sep-1997
 !subroutine microfast(carma, cstate, iz, rc)
-subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
+subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)      !PETER
 
   ! types
   use carma_precision_mod
@@ -26,11 +26,15 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
   integer, intent(in)                  :: iz          !! z index
   integer, intent(inout)               :: rc          !! return code, negative indicates failure
   real(kind=f), optional, intent(in)   :: maxrate     !! PETER
+  real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
+  real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
 
   ! Local Variables
   integer                              :: ielem   ! element index
   integer                              :: ibin    ! bin index
   integer                              :: igas    ! gas index
+  integer                              :: igrp    ! group index (rnuclgsum precompute)
+  integer                              :: jgrp    ! source group index (rnuclgsum precompute)
   real(kind=f)                         :: previous_ice(NGAS)      ! total ice at the start of substep
   real(kind=f)                         :: previous_liquid(NGAS)   ! total liquid at the start of substep
   real(kind=f)                         :: previous_supsatl(NGAS)  ! supersaturation wrt ice at the start of substep
@@ -103,7 +107,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
  	
  	!write(*,*) 'after homnucgen'
 	
-    call growevapl(carma, cstate, iz, rc)
+    call growevapl(carma, cstate, iz, rc, dtime_in)
     if (rc < RC_OK) return
 
     !write(*,*) "after growevapl, before actdropl"
@@ -142,7 +146,16 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
  !   if (rc < RC_OK) return
 
  !   call melticel(carma, cstate, iz, rc)
- !   if (rc < RC_OK) return    
+ !   if (rc < RC_OK) return
+
+    ! Precompute per-group nucleation loss sum for psolve.
+    ! Loop order (jgrp outer, ibin inner) gives stride-1 access on both arrays.
+    do jgrp = 1, NGROUP
+      do igrp = 1, NGROUP
+        rnuclgsum(:,igrp,iz) = rnuclgsum(:,igrp,iz) + rnuclg(:,igrp,jgrp,iz)
+      end do
+    end do
+
   endif
 
   !write(*,*) "after freezing things"
@@ -164,7 +177,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
       endif
 
       !write(*,*) ielem, ibin, "psolve"
-      call psolve(carma, cstate, iz, ibin, ielem, rc)
+      call psolve(carma, cstate, iz, ibin, ielem, rc, dtime_in)
         !write(*,*) 'after psolve',iz,ibin,ielem,pc(iz,ibin,ielem)
      if (rc < RC_OK) return
      
@@ -192,10 +205,10 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
 !    call gasexchange(carma, cstate, iz, rc)
 !    if (rc < RC_OK) return
 
-    call downgevapply(carma, cstate, iz, rc)
+    call downgevapply(carma, cstate, iz, rc, dtime_in)
     if (rc < RC_OK) return
 
-    call gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc)
+    call gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in, nretries_in)
     if (rc /=RC_OK) return
   endif
 
@@ -205,7 +218,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
   if (do_thermo) then
 
    ! write(*,*) "doing tsolve?"
-    call tsolve(carma, cstate, iz, rc)
+    call tsolve(carma, cstate, iz, rc, dtime_in, nretries_in)
     if (rc /= RC_OK) return
   endif
 
@@ -251,7 +264,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
         if (ds_threshold(igas) > 0._f) then
           if ((srat >= ds_threshold(igas)) .and. (abs(supsatold - supsatnew) > 0.1_f)) then
             if (do_substep) then
-              if (nretries == maxretries) then 
+              if (nretries_in == maxretries) then 
                 if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
 		              lat, lon, srat, previous_supsati(igas), previous_supsatl(igas), &
                 supsati(iz, igas), supsatl(iz,igas), t(iz)       
@@ -262,7 +275,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
               rc = RC_WARNING_RETRY
             else
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), &
-		              iz, lat, lon, gc(iz,igas), gasprod(igas), &
+		              iz, lat, lon, gc(iz,igas), gasprod(igas,iz), &
                   supsati(iz, igas), supsatl(iz,igas), t(iz)
             end if
           end if
@@ -279,15 +292,15 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
         ! point is probably not going to affect the overall result by too much.
         s_threshold = abs(ds_threshold(igas))
         
-        if (nretries >= (0.8_f * maxretries)) then
+        if (nretries_in >= (0.8_f * maxretries)) then
           s_threshold = 4._f  * s_threshold
-        else if (nretries >= (0.7_f * maxretries)) then
+        else if (nretries_in >= (0.7_f * maxretries)) then
           s_threshold = 3.5_f * s_threshold
-        else if (nretries >= (0.6_f * maxretries)) then
+        else if (nretries_in >= (0.6_f * maxretries)) then
           s_threshold = 3._f  * s_threshold
-        else if (nretries >= (0.5_f * maxretries)) then
+        else if (nretries_in >= (0.5_f * maxretries)) then
           s_threshold = 2.5_f * s_threshold
-        else if (nretries >= (0.4_f * maxretries)) then
+        else if (nretries_in >= (0.4_f * maxretries)) then
           s_threshold = 2._f  * s_threshold
         end if
         
@@ -298,7 +311,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
         if (((supsatnew * supsatold) < 0._f) .and. (abs(supsatnew) > s_threshold)) then
 
           if (do_substep) then
-            if (nretries == maxretries) then 
+            if (nretries_in == maxretries) then 
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
 		              lat, lon, previous_supsati(igas), previous_supsatl(igas), &
               	  supsati(iz, igas), supsatl(iz,igas), t(iz)
@@ -307,7 +320,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate)      !PETER
             end if
           else
             if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-		              lat, lon, gc(iz,igas), gasprod(igas), &
+		              lat, lon, gc(iz,igas), gasprod(igas,iz), &
               	  supsati(iz, igas), supsatl(iz,igas), t(iz)
           end if
           

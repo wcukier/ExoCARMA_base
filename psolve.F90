@@ -16,7 +16,7 @@
 !!
 !! @author Eric Jensen, Bill McKie
 !! @version Oct-1995, Sep-1997
-subroutine psolve(carma, cstate, iz, ibin, ielem, rc)
+subroutine psolve(carma, cstate, iz, ibin, ielem, rc, dtime_in)
 
 
   ! types
@@ -37,6 +37,7 @@ subroutine psolve(carma, cstate, iz, ibin, ielem, rc)
   integer, intent(in)                  :: ibin    !! bin index
   integer, intent(in)                  :: ielem   !! element index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
 
   ! Local declarations
   integer                        :: igroup    ! group index
@@ -58,56 +59,56 @@ subroutine psolve(carma, cstate, iz, ibin, ielem, rc)
   if(do_grow) then
 
     ! Compute total production rate
-    ppd = rnucpe(ibin,ielem) + rhompe(ibin,ielem)  + growpe(ibin,ielem)  + evappe(ibin,ielem) + phochemprod(iz,ibin,ielem)
-    !ppd = rnucpe(ibin,ielem)/ xyzmet(iz) + rhompe(ibin,ielem)/ xyzmet(iz)  + growpe(ibin,ielem)/ xyzmet(iz)  + evappe(ibin,ielem)/ xyzmet(iz)  + phochemprod(iz,ibin,ielem)/ xyzmet(iz) 
-    !write(*,*) 'psolve ppd', iz, ibin, ielem, rnucpe(ibin,ielem), rhompe(ibin,ielem), growpe(ibin,ielem), evappe(ibin,ielem)
-    !write(*,*) iz, ibin, ielem, rnucpe(ibin,ielem)
+    ppd = rnucpe(ibin,ielem,iz) + rhompe(ibin,ielem,iz)  + growpe(ibin,ielem,iz)  + evappe(ibin,ielem,iz) + phochemprod(iz,ibin,ielem)
+    !ppd = rnucpe(ibin,ielem,iz)/ xyzmet(iz) + rhompe(ibin,ielem,iz)/ xyzmet(iz)  + growpe(ibin,ielem,iz)/ xyzmet(iz)  + evappe(ibin,ielem,iz)/ xyzmet(iz)  + phochemprod(iz,ibin,ielem)/ xyzmet(iz)
+    !write(*,*) 'psolve ppd', iz, ibin, ielem, rnucpe(ibin,ielem,iz), rhompe(ibin,ielem,iz), growpe(ibin,ielem,iz), evappe(ibin,ielem,iz)
+    !write(*,*) iz, ibin, ielem, rnucpe(ibin,ielem,iz)
     !write(*,*), iz,ibin,ielem,phochemprod(iz,ibin,ielem)
     ! Sum up nucleation loss rates
-    rnuclgtot = sum(rnuclg(ibin,igroup,:))
+    rnuclgtot = rnuclgsum(ibin,igroup,iz)
 
-!    if (rnucpe(ibin,ielem) > 1.e-50_f) then
-!    	write(*,*) ibin, ielem, rnucpe(ibin,ielem), 'rnucpe'
+!    if (rnucpe(ibin,ielem,iz) > 1.e-50_f) then
+!    	write(*,*) ibin, ielem, rnucpe(ibin,ielem,iz), 'rnucpe'
 !    end if
-!    
-!    if (evappe(ibin,ielem) > 1.e-50_f) then
-!    	write(*,*) ibin, ielem, evappe(ibin,ielem), 'evappe'
+!
+!    if (evappe(ibin,ielem,iz) > 1.e-50_f) then
+!    	write(*,*) ibin, ielem, evappe(ibin,ielem,iz), 'evappe'
 !    end if
-!    
-!    if (growpe(ibin,ielem) > 1.e-50_f) then
-!    	write(*,*) ibin, ielem, growpe(ibin,ielem), 'growpe'
+!
+!    if (growpe(ibin,ielem,iz) > 1.e-50_f) then
+!    	write(*,*) ibin, ielem, growpe(ibin,ielem,iz), 'growpe'
 !    end if
 
     ! Compute total loss rate
-    pls = rnuclgtot + growlg(ibin,igroup) + evaplg(ibin,igroup) 
-    !pls = rnuclg(ibin,igroup,iz)/ xyzmet(iz) + growlg(ibin,igroup)/ xyzmet(iz) + evaplg(ibin,igroup)/ xyzmet(iz) 
-        !write(*,*) 'psolve pls', iz, ibin, ielem,rnuclgtot,  growlg(ibin,igroup),  evaplg(ibin,igroup), pc(iz, ibin, ielem)
+    pls = rnuclgtot + growlg(ibin,igroup,iz) + evaplg(ibin,igroup,iz)
+    !pls = rnuclg(ibin,igroup,iz,iz)/ xyzmet(iz) + growlg(ibin,igroup,iz)/ xyzmet(iz) + evaplg(ibin,igroup,iz)/ xyzmet(iz)
+        !write(*,*) 'psolve pls', iz, ibin, ielem,rnuclgtot,  growlg(ibin,igroup,iz),  evaplg(ibin,igroup,iz), pc(iz, ibin, ielem)
 
     ! Update net particle number concentration during current timestep
     ! due to production and loss rates.
-    pc(iz,ibin,ielem) = (pc(iz,ibin,ielem) + dtime * ppd) / (ONE + pls * dtime)
+    pc(iz,ibin,ielem) = (pc(iz,ibin,ielem) + dtime_in * ppd) / (ONE + pls * dtime_in)
         !write(*,*) 'psolve pc', iz, ibin, ielem,ppd,pls,pc(iz, ibin, ielem)
 
    ! if (ibin .eq. 1) then
-!	write(*,*) 'psolve', evaplg(1,ielem), iz, ielem
+!	write(*,*) 'psolve', evaplg(1,ielem,iz), iz, ielem
  !   endif
-    
+
     ! Figure out how many particles were produced from nucleation. This is just
     ! for statistics and is done as a total for the step, not per substep.
-    
-    !pc_nonuc = (pc(iz,ibin,ielem) + dtime * (ppd - &
-     !   rnucpe(ibin,ielem) - rhompe(ibin,ielem))) / (ONE + (pls) * dtime)
+
+    !pc_nonuc = (pc(iz,ibin,ielem) + dtime_in * (ppd - &
+     !   rnucpe(ibin,ielem,iz) - rhompe(ibin,ielem,iz))) / (ONE + (pls) * dtime_in)
     !pc_nucl(iz,ibin,ielem) = pc_nucl(iz,ibin,ielem) + (pc(iz,ibin,ielem) - pc_nonuc)
-    
-    pc_nucl(iz,ibin,ielem) = (pc_nucl(iz,ibin,ielem) + dtime * (rnucpe(ibin,ielem) + rhompe(ibin,ielem))) / (ONE + rnuclgtot * dtime)
-    
+
+    pc_nucl(iz,ibin,ielem) = (pc_nucl(iz,ibin,ielem) + dtime_in * (rnucpe(ibin,ielem,iz) + rhompe(ibin,ielem,iz))) / (ONE + rnuclgtot * dtime_in)
+
     pc_psolve(iz,ibin,ielem) = pc(iz,ibin,ielem)                                        !PETER
-  end if 
-  
+  end if
+
   ! Prevent particle concentrations from dropping below SMALL_PC
   call smallconc(carma, cstate, iz, ibin, ielem, rc)
 
-  rnucpeup(ibin,ielem) = rnucpe(ibin,ielem)	!PETER
+  rnucpeup(ibin,ielem,iz) = rnucpe(ibin,ielem,iz)	!PETER
 
   !  Return to caller with new particle number concentrations.
   return

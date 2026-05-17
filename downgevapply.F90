@@ -7,7 +7,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Dec-1995
-subroutine downgevapply(carma, cstate, iz, rc)
+subroutine downgevapply(carma, cstate, iz, rc, dtime_in)
 
 	! types
   use carma_precision_mod
@@ -25,6 +25,7 @@ subroutine downgevapply(carma, cstate, iz, rc)
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
 
   ! Local declarations
   integer                              :: ibin    !! bin index
@@ -40,8 +41,8 @@ subroutine downgevapply(carma, cstate, iz, rc)
 	!write(*,*) 'downevapply before', iz, ibin, ielem, pc(iz,ibin,ielem), evappe(ibin,ielem), rnucpe(ibin,ielem)
 
       pc(iz,ibin,ielem) = pc(iz,ibin,ielem) + &
-                         dtime * ( evappe(ibin,ielem) + &
-                                   rnucpe(ibin,ielem) )
+                         dtime_in * ( evappe(ibin,ielem,iz) + &
+                                   rnucpe(ibin,ielem,iz) )
 
 	!write(*,*) 'downevapply after', iz, ibin, ielem, pc(iz,ibin,ielem)
 

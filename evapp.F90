@@ -57,21 +57,21 @@ subroutine evapp(carma, cstate, iz, rc)
 
       ! Make sure that these always get intializaed, since they can
       ! cause problems in other parts of the code if they aren't.     
-      totevap(:,ig) = .false.
-      cmf(:,ig)     = 0._f
+      totevap(:,ig,iz) = .false.
+      cmf(:,ig,iz)     = 0._f
 
       if (pconmax(iz, ig) > FEW_PC) then
  
         ic1 = icorelem(1,ig)
 
         ! Loop over source bins and calculate temporary evaporation source
-        ! for droplets in next smaller bin assuming no total evaporation <evdrop>
+        ! for droplets in next smaller bin assuming no total evaporation <evdrop(iz)>
         do ibin = 1, NBIN
-          evdrop = pc(iz,ibin,ip)*evaplg(ibin,ig)
+          evdrop(iz) = pc(iz,ibin,ip)*evaplg(ibin,ig,iz)
 
           ! Check for evaporation of a sufficient number of droplets
-!          if( evdrop .gt. 0._f .and. pc(iz,ibin,ip) .gt. SMALL_PC )then
-          if( evdrop .gt. 0._f )then
+!          if( evdrop(iz) .gt. 0._f .and. pc(iz,ibin,ip) .gt. SMALL_PC )then
+          if( evdrop(iz) .gt. 0._f )then
  
             ! No cores: transfer droplets within group
             if( ic1 .eq. 0 )then
@@ -87,7 +87,7 @@ subroutine evapp(carma, cstate, iz, rc)
               else
 
                 ! Have cores: calculate <evcore> the amount of the source term 
-                ! by number <evdrop> associated with total evaporation of secondary cores
+                ! by number <evdrop(iz)> associated with total evaporation of secondary cores
                 coretot = pc(iz,ibin,ic1)
                 do ic = 2, ncore(ig)
                   iecore = icorelem(ic,ig)
@@ -98,14 +98,14 @@ subroutine evapp(carma, cstate, iz, rc)
                 do ic = 2, ncore(ig)
                   iecore = icorelem(ic,ig)
                   if( itype(iecore) .eq. I_COREMASS )then
-                    evcore(ic) = evdrop*pc(iz,ibin,iecore)/coretot  
+                    evcore(ic,iz) = evdrop(iz)*pc(iz,ibin,iecore)/coretot  
                   endif
                 enddo 
   
                 ! Calculate average particle core mass and fraction
-                coreavg = coretot / pc(iz,ibin,ip) 
-                coreavg = min( rmass(ibin,ig), coreavg )
-                cmf(ibin,ig) = coreavg / rmass(ibin,ig)
+                coreavg(iz) = coretot / pc(iz,ibin,ip) 
+                coreavg(iz) = min( rmass(ibin,ig), coreavg(iz) )
+                cmf(ibin,ig,iz) = coreavg(iz) / rmass(ibin,ig)
   !                 cmf(ibin,ig) = max( 0., min( ONE, cmf(ibin,ig) ) )
   
                 ! Get target number concentration element and group for total evaporation
@@ -114,30 +114,30 @@ subroutine evapp(carma, cstate, iz, rc)
                 ieto = ievp2elem(ic1)
                 igto = igelem(ieto)
   
-                too_small = coreavg .lt. rmass(1,igto)
+                too_small(iz) = coreavg(iz) .lt. rmass(1,igto)
                 nbin = NBIN
-                too_big   = coreavg .gt. rmass(nbin,igto)
+                too_big(iz)   = coreavg(iz) .gt. rmass(nbin,igto)
   
-                if( .not. (too_small .or. too_big) )then
-                  iavg = log( coreavg / rmassmin(igto) ) / &
+                if( .not. (too_small(iz) .or. too_big(iz)) )then
+                  iavg = log( coreavg(iz) / rmassmin(igto) ) / &
                          log( rmrat(igto) ) + 2
                   iavg = min( iavg, NBIN )
                 endif
   
-                ! Only consider size of evaporating cores relative to nuc_small
+                ! Only consider size of evaporating cores relative to nuc_small(iz)
                 ! when treating core second moment for this particle group
                 if( if_sec_mom(ig) )then
-                  nuc_small = coreavg .lt. rmass(1,igto)
+                  nuc_small(iz) = coreavg(iz) .lt. rmass(1,igto)
                 else
-                  nuc_small = .false.
+                  nuc_small(iz) = .false.
                 endif
   
                 ! Want total evaporation when 
                 !  cores smaller than smallest nucleated 
                 !  OR evaporating droplets are in bin 1
                 !  OR droplets will be created with core mass fraction > 1
-                evap_total = nuc_small .or. ibin .eq. 1 .or. &
-                    rmrat(ig)*cmf(ibin,ig) .gt. ONE
+                evap_total = nuc_small(iz) .or. ibin .eq. 1 .or. &
+                    rmrat(ig)*cmf(ibin,ig,iz) .gt. ONE
   
                 ! No core second moment: evaporate to monodisperse CN cores or within group.!
                 if( .not. if_sec_mom(ig) )then
@@ -151,12 +151,12 @@ subroutine evapp(carma, cstate, iz, rc)
                 ! Have core second moments: evaporate to mono- or polydisperse CN cores
                 ! or within group.  First calculate average core second moment <coremom>, 
                 ! second moment fraction <smf>, and square of the logarithm of the geometric
-                ! standard deviation of the assumed core mass distribution <coresig>.
+                ! standard deviation of the assumed core mass distribution <coresig(iz)>.
                 else
   
                   coremom = pc(iz,ibin,imomelem(ig)) /  pc(iz,ibin,ip)
                   smf = coremom / rmass(ibin,ig)**2
-                  coresig = log( smf / cmf(ibin,ig)**2 )
+                  coresig(iz) = log( smf / cmf(ibin,ig,iz)**2 )
   
                   ! Want total evaporation for above reasons 
                   !  OR droplets will be created with core moment fraction > 1
@@ -168,7 +168,7 @@ subroutine evapp(carma, cstate, iz, rc)
                     !  cores smaller than smallest nucleated 
                     !  OR evaporating core distribution is narrow
                     ! Otherwise want polydisperse total evaporation 
-                    if( nuc_small .or. coresig .le. sig_mono )then
+                    if( nuc_small(iz) .or. coresig(iz) .le. sig_mono )then
                       call evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
                     else
                       call evap_poly(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)

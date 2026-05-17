@@ -280,15 +280,15 @@ subroutine freezaerl_tabazadeh2000(carma, cstate, iz, rc)
                     ! Ice nucleation rate in a 0.2 micron aerosol (/sec)
                     expon = ( -diffact - delfg ) / BK / t(iz)
                     expon = max( -100._f*ONE, expon )
-                    rnuclg(ibin,igroup,ignucto) = prenuc * &
+                    rnuclg(ibin,igroup,ignucto,iz) = prenuc * &
                            sqrt(sigsulice*t(iz)) * &
                            vrat*vol(ibin,igroup) * exp( expon )
-                           
+
                     ! This parameterizations has problems that sometimes yield negative nucleation
                     ! rates. It would be best to fix the parameterization, but at least keep negative
                     ! values from being return.
-                    if (rnuclg(ibin,igroup,ignucto) < 0._f) then
-                      rnuclg(ibin,igroup,ignucto) = 0._f
+                    if (rnuclg(ibin,igroup,ignucto,iz) < 0._f) then
+                      rnuclg(ibin,igroup,ignucto,iz) = 0._f
                     end if
                   
                   

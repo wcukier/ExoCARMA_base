@@ -116,7 +116,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
       
                 ! Set <evapfrom_nucto> to .true. when target droplets are evaporating
                 if( inucto .ne. 0 )then
-                 evapfrom_nucto = evaplg(inucto,ignucto) .gt. 0._f
+                 evapfrom_nucto = evaplg(inucto,ignucto,iz) .gt. 0._f
                 else
                  evapfrom_nucto = .false.
                 endif
@@ -126,7 +126,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 
                   if( inucproc(iepart,ienucto) .eq. I_DROPACT ) then
 		                if (supsatl(iz,igas) .gt. scrit(iz,ibin,igroup,igas)) then
- 		                  rnuclg(ibin,igroup,ignucto) = 1.0e3_f
+ 		                  rnuclg(ibin,igroup,ignucto,iz) = 1.0e3_f
 		                endif
                   else  
                     ! if (igas .eq. igash2o) then
@@ -148,7 +148,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 	                  ccn_gas = igrowgas(iepart)
 
   	                if (agnuc .eq. 0._f) then
-                      rnuclg(ibin,igroup,ignucto) = 0._f
+                      rnuclg(ibin,igroup,ignucto,iz) = 0._f
                     else
 	                 
 	                    if (mucos(igas,igroup) .eq. 0._f) then
@@ -199,14 +199,14 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 		                    3._f)*radratio**2)) / phi**3)) 		    
                       
                         ! Gao 2017 A.6
-                      rnuclg(ibin,igroup,ignucto) = (4._f * PI**2 * r(ibin,igroup)**2 * &
+                      rnuclg(ibin,igroup,ignucto,iz) = (4._f * PI**2 * r(ibin,igroup)**2 * &
                         agnuc**2 * fluxmol * surfcond * &
                         zv * exp( -1._f * deltafg * &
                         curvfact / (BK * t(iz))))! * redugrow(igas)
 
                       !DPOW Check --> change units of rnuclg to CARMA units if not in I_CART, possibly need to divide instead of multiply
-                
-                      rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto)
+
+                      rnuclg(ibin,igroup,ignucto,iz) = rnuclg(ibin,igroup,ignucto,iz)
                       !write(*,*) "iz, igas, igroup, ibin, dtime, ignucto, rnuclg, agnuc, fluxmol, surfcond, zv, deltafg, molgerm, curvfact, imucos, radratio, phi, fo, temp1"
                       !write(*,*) iz, igas, igroup, ibin, dtime, ignucto, rnuclg(ibin,igroup,ignucto), agnuc, fluxmol, surfcond, zv, deltafg, molgerm, curvfact, imucos, radratio, phi, fo, temp1
 

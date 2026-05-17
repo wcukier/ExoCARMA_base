@@ -266,6 +266,7 @@
 #define coagprod      cstate%f_coagprod
 #define coagloss      cstate%f_coagloss
 #define rnuclg        cstate%f_rnuclg
+#define rnuclgsum     cstate%f_rnuclgsum
 #define rnucpe        cstate%f_rnucpe
 #define rnucpeup      cstate%f_rnucpeup
 #define rhompe        cstate%f_rhompe

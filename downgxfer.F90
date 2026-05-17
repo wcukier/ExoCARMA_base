@@ -55,7 +55,7 @@ subroutine downgxfer(carma, cstate, iz, rc)
 
   ! Set nucleation production rates to zero to avoid double-application
   ! of rates calculated in upgxfer.f
-  rnucpe(:,:) = 0._f
+  rnucpe(:,:,iz) = 0._f
 
   ! Loop over particle elements and bins
   do ielem = 1, NELEM
@@ -105,7 +105,7 @@ subroutine downgxfer(carma, cstate, iz, rc)
 
             ! Bypass calculation if few source particles are present
             if( pconmax(iz,igfrom) .gt. FEW_PC )then
-              if( rnuclg(ifrom,igfrom,igroup) .gt. 0._f )then
+              if( rnuclg(ifrom,igfrom,igroup,iz) .gt. 0._f )then
            
                 ! First calculate mass associated with the source element <elemass>
                 ! (this is <rmass> for all source elements except particle number
@@ -125,10 +125,10 @@ subroutine downgxfer(carma, cstate, iz, rc)
                   elemass  = fracmass * rmass(ifrom,igfrom)
                 endif
 
-                rnucprod = rnuclg(ifrom,igfrom,igroup) * &
+                rnucprod = rnuclg(ifrom,igfrom,igroup,iz) * &
                   pc(iz,ifrom,iefrom) * elemass**ipow
 
-                rnucpe(ibin,ielem) = rnucpe(ibin,ielem) + rnucprod
+                rnucpe(ibin,ielem,iz) = rnucpe(ibin,ielem,iz) + rnucprod
 
                 ! Calculate latent heat associated with nucleation to <ibin,ielem>
                 ! from <ifrom,iefrom>

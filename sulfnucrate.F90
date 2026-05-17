@@ -306,7 +306,7 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
     nucrate = 0.0_f
   else
     ! Calculate the nucleation rate [#/cm3/s], Zhao & Turco eqn 16.
-    nucrate = rpre * zeld * exhom * redugrow(igash2so4)
+    nucrate = rpre * zeld * exhom * redugrow(igash2so4,iz)
 
    ! write(*,*) exhom
         

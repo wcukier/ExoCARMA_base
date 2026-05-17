@@ -52,7 +52,7 @@ subroutine sulfnuc(carma,cstate, iz, rc)
       ! Do further calculations only if nucleation occurred
       if (nucrate .gt. 0._f) then
 
-        rhompe(nucbin, ielem) = rhompe(nucbin, ielem) + nucrate
+        rhompe(nucbin, ielem, iz) = rhompe(nucbin, ielem, iz) + nucrate
         
         ! Since homogeneous nucleation doesn't go through upgxfer or downgxfer, then
         ! then the effects of latent heat need to be accounted for here.

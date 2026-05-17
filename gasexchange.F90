@@ -67,8 +67,8 @@ subroutine gasexchange(carma, cstate, iz, rc)
             i2 = inuc2bin(i,igroup,ig2)            ! target bin
 
             gprod_nuc(igroup,igas) = gprod_nuc(igroup,igas) - &
-              pc(iz,i,ielem) * rnuclg(i,igroup,ig2) * &
-              diffmass(i2,ig2,i,igroup) - rhompe(i,ielem) * rmass(i,igroup)
+              pc(iz,i,ielem) * rnuclg(i,igroup,ig2,iz) * &
+              diffmass(i2,ig2,i,igroup) - rhompe(i,ielem,iz) * rmass(i,igroup)
           enddo    
 
           ! Latent heating rate from condensing gas: <rlh> is latent heat of evaporation 
@@ -96,23 +96,23 @@ subroutine gasexchange(carma, cstate, iz, rc)
 
         ! Calculate <gasgain>, mass concentration of gas gained due to evaporation
         ! from each droplet in bin <i+1>.  First check for total evaporation.
-        if( totevap(i+1,igroup) )then
-          gasgain = ( 1._f - cmf(i+1,igroup) )*rmass(i+1,igroup)
+        if( totevap(i+1,igroup,iz) )then
+          gasgain = ( 1._f - cmf(i+1,igroup,iz) )*rmass(i+1,igroup)
         else
           gasgain = diffmass(i+1,igroup,i,igroup)
         endif
 
         gprod_grow(igroup,igas) = gprod_grow(igroup,igas) &
-          + evaplg(i+1,igroup) * pc(iz,i+1,ielem) * &
+          + evaplg(i+1,igroup,iz) * pc(iz,i+1,ielem) * &
             gasgain &
-          - growlg(i,igroup) * pc(iz,i,ielem) * &
+          - growlg(i,igroup,iz) * pc(iz,i,ielem) * &
             diffmass(i+1,igroup,i,igroup)
       enddo    
 
       ! Add evaporation out of smallest bin (always total evaporation).
       gprod_grow(igroup,igas) = gprod_grow(igroup,igas) + &
-        evaplg(1,igroup) * pc(iz,1,ielem) * &
-        ( 1._f - cmf(1,igroup) ) * rmass(1,igroup)
+        evaplg(1,igroup,iz) * pc(iz,1,ielem) * &
+        ( 1._f - cmf(1,igroup,iz) ) * rmass(1,igroup)
 
       ! Latent heating rate from condensing gas: <rlh> is latent heat of evaporation 
       ! ( + fusion, for ice deposition ) [erg/g]
@@ -130,7 +130,7 @@ subroutine gasexchange(carma, cstate, iz, rc)
   ! Sum up gas production from nucleation and growth terms.
   do igas = 1,NGAS
     do igroup = 1,NGROUP
-      gasprod(igas) = gasprod(igas) + &
+      gasprod(igas,iz) = gasprod(igas,iz) + &
          gprod_nuc(igroup,igas) + gprod_grow(igroup,igas)
     enddo
   enddo

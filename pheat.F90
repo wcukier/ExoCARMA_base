@@ -25,7 +25,7 @@
 !!
 !! @author Chuck Bardeen
 !! @version Jan-2010
-subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
+subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_in)
 
   ! types
   use carma_precision_mod
@@ -51,6 +51,7 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   integer, intent(in)                  :: igas    !! gas index
   real(kind=f), intent(out)            :: dmdt    !! particle growth rate (g/s)
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
 
   ! Local declarations
   integer, parameter                   :: MAX_ITER      = 10      ! Maximum number of iterations
@@ -283,8 +284,8 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
   
       ! Calculate a new particle temperature based upon the loss of mass and
       ! energy being absorbed.
-      if ((dmdt * dtime) .le. (- rmass(ibin+1, igroup))) then
-        dtp = ((rlh * (- rmass(ibin+1, igroup) / dtime)) + qrad) / &
+      if ((dmdt * dtime_in) .le. (- rmass(ibin+1, igroup))) then
+        dtp = ((rlh * (- rmass(ibin+1, igroup) / dtime_in)) + qrad) / &
                (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup,igas) &
 		* ft(iz,ibin+1,igroup,igas))
       else
@@ -334,14 +335,14 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc)
 
       ! NOTE: If the particle is going to evaporate entirely during the timestep,
       ! then assume that there is no particle heating.
-      if ((dmdt * dtime) .gt. (- rmass(ibin+1, igroup))) then
+      if ((dmdt * dtime_in) .gt. (- rmass(ibin+1, igroup))) then
     
         ! If the particles are radiatively active, then the parent model's radiation
         ! code is calculated based upon Ta, not Tp. Adjust for this error in Qrad.
 !        phprod = phprod + (qrad - qrad0) * pc(iz,ibin+1,iepart) / CP / rhoa(iz)
 
         ! Now add in the heating from thermal conduction.
-        phprod = phprod + 4._f * PI * rlow_wet(iz,ibin+1,igroup) * &
+        phprod(iz) = phprod(iz) + 4._f * PI * rlow_wet(iz,ibin+1,igroup) * &
 		thcondnc(iz,ibin+1,igroup,igas) * &
                 ft(iz,ibin+1,igroup,igas) * dtp * pc(iz,ibin+1,iepart) &
 		/ (CP * rhoa(iz))

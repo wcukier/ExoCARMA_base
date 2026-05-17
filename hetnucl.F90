@@ -124,7 +124,7 @@ subroutine hetnucl(carma, cstate, iz, rc)
     
               ! Set <evapfrom_nucto> to .true. when target droplets are evaporating
               if (inucto .ne. 0) then
-                evapfrom_nucto = evaplg(inucto,ignucto) .gt. 0._f
+                evapfrom_nucto = evaplg(inucto,ignucto,iz) .gt. 0._f
               else
                 evapfrom_nucto = .false.
               endif
@@ -171,12 +171,12 @@ subroutine hetnucl(carma, cstate, iz, rc)
 
                 ! NOTE: Excessive nucleation makes it difficult for the substepping to find a
                 ! stable solution, so put a cap on really large nucleation values that can be produced.
-                rnuclg(ibin,igroup,ignucto) = zeld * BK * t(iz) * diflen * ag * sin(contang) * &
+                rnuclg(ibin,igroup,ignucto,iz) = zeld * BK * t(iz) * diflen * ag * sin(contang) * &
                   4._f * PI * r(ibin,igroup)**2 * rnh2o**2 / (fh * rmw * vibfreq) * exp(expon)
-                  
+
                 !DPOW Check --> change units of rnuclg to CARMA units if not in I_CART, possibly need to divide instead of multiply
-                
-                rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) * zmet(iz) * xmet(iz) * ymet(iz)
+
+                rnuclg(ibin,igroup,ignucto,iz) = rnuclg(ibin,igroup,ignucto,iz) * zmet(iz) * xmet(iz) * ymet(iz)
                 
 		!if (t(iz) .gt. 200._f) then
 		 ! write(*,*) "het_orig", iz, ibin, rnuclg(ibin,igroup,ignucto), ag*diflen*sin(contang), rnh2o*BK*t(iz), zeld, rmw, exp(expon), fh

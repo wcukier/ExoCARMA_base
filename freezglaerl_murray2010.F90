@@ -122,7 +122,7 @@ subroutine freezglaerl_murray2010(carma, cstate, iz, rc)
                     endif
                     
                     ! Add the rate of heterogenous freezing to the rate of homogeneous
-                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) + fglass * dfice / dtime
+                    rnuclg(ibin,igroup,ignucto,iz) = rnuclg(ibin,igroup,ignucto,iz) + fglass * dfice / dtime
                   endif    
                 endif
               enddo

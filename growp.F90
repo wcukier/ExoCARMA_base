@@ -43,7 +43,7 @@ subroutine growp(carma, cstate, iz, ibin, ielem, rc)
 
     ! Bypass calculation if few droplets are present 
     if( pconmax(iz,igroup) .gt. FEW_PC )then
-      growpe(ibin,ielem) = pc(iz,ibin-1,ielem) * growlg(ibin-1,igroup) 
+      growpe(ibin,ielem,iz) = pc(iz,ibin-1,ielem) * growlg(ibin-1,igroup,iz)
     endif
   endif
 

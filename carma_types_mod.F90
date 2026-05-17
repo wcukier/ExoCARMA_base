@@ -730,23 +730,24 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagpe     ! (NZ,NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagprod   ! (NZ,NBIN,NELEM)		!PETER
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagloss   ! (NZ,NBIN,NELEM)		!PETER
-    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnuclg     ! (NBIN,NGROUP,NGROUP)
-    real(kind=f), allocatable, dimension(:,:)     :: f_rnucpe     ! (NBIN,NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_rnucpeup   ! (NBIN,NELEM)           !PETER
-    real(kind=f), allocatable, dimension(:,:)     :: f_rhompe     ! (NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_rnuclg     ! (NBIN,NGROUP,NGROUP,NZ)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnuclgsum  ! (NBIN,NGROUP,NZ) sum of rnuclg over "into" groups
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnucpe     ! (NBIN,NELEM,NZ)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnucpeup   ! (NBIN,NELEM,NZ)        !PETER
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_rhompe     ! (NBIN,NELEM,NZ)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_pc_nucl    ! (NZ,NBIN,NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_growpe     ! (NBIN,NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_evappe     ! (NBIN,NELEM)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_growpe     ! (NBIN,NELEM,NZ)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_evappe     ! (NBIN,NELEM,NZ)
     real(kind=f)                                  :: f_vertpartflux			!PETER
     real(kind=f)                                  :: f_vertgasflux			!PETER
-    real(kind=f)                                  :: f_coreavg
-    real(kind=f)                                  :: f_coresig
-    real(kind=f)                                  :: f_evdrop
-    real(kind=f), allocatable, dimension(:)       :: f_evcore     ! (NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_growlg     ! (NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:,:)     :: f_evaplg     ! (NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:)       :: f_redugrow    ! (NGAS)
-    real(kind=f), allocatable, dimension(:)       :: f_gasprod    ! (NGAS)
+    real(kind=f), allocatable, dimension(:)       :: f_coreavg    ! (NZ)
+    real(kind=f), allocatable, dimension(:)       :: f_coresig    ! (NZ)
+    real(kind=f), allocatable, dimension(:)       :: f_evdrop     ! (NZ)
+    real(kind=f), allocatable, dimension(:,:)     :: f_evcore     ! (NELEM,NZ)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_growlg     ! (NBIN,NGROUP,NZ)
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_evaplg     ! (NBIN,NGROUP,NZ)
+    real(kind=f), allocatable, dimension(:,:)     :: f_redugrow   ! (NGAS,NZ)
+    real(kind=f), allocatable, dimension(:,:)     :: f_gasprod    ! (NGAS,NZ)
     real(kind=f), allocatable, dimension(:,:)       :: f_gasprod_tot    ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:,:)       :: f_rnucpeup_tot    ! (NZ,NBIN,NELEM)
     real(kind=f), allocatable, dimension(:,:,:)       :: f_rhompe_tot    ! (NZ,NBIN,NELEM)
@@ -774,12 +775,12 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:)     :: f_gflux      ! (NZP1,NGAS)               !PETER
     real(kind=f), allocatable, dimension(:,:,:)   :: f_pflux      ! (NZP1,NBIN,NELEM)         !PETER
     real(kind=f), allocatable, dimension(:)   	  :: f_winds      ! (NZ)	 	        !PETER
-    real(kind=f), allocatable, dimension(:,:)     :: f_cmf        ! (NBIN,NGROUP)
-    logical, allocatable, dimension(:,:)          :: f_totevap    ! (NBIN,NGROUP)
-    logical                                       :: f_too_small
-    logical                                       :: f_too_big
-    logical                                       :: f_nuc_small
-    real(kind=f)                                  :: f_rlprod
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_cmf        ! (NBIN,NGROUP,NZ)
+    logical, allocatable, dimension(:,:,:)        :: f_totevap    ! (NBIN,NGROUP,NZ)
+    logical, allocatable, dimension(:)            :: f_too_small  ! (NZ)
+    logical, allocatable, dimension(:)            :: f_too_big    ! (NZ)
+    logical, allocatable, dimension(:)            :: f_nuc_small  ! (NZ)
+    real(kind=f), allocatable, dimension(:)       :: f_rlprod     ! (NZ)
 
     !  Coagulation kernels and bin pair mapping
     !
@@ -909,6 +910,6 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:)    :: f_radint     ! (NZ,NWAVE)
     real(kind=f), allocatable, dimension(:)      :: f_partheat   ! (NZ)
     real(kind=f), allocatable, dimension(:,:,:)  :: f_dtpart     ! (NZ,NBIN,NGROUP)
-    real(kind=f)                                 :: f_phprod
+    real(kind=f), allocatable, dimension(:)      :: f_phprod     ! (NZ)
    end type carmastate_type   
 end module

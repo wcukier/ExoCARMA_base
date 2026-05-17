@@ -31,6 +31,10 @@ subroutine newstate(carma, cstate, rc)
   real(kind=f)                    :: gc_orig(NZ,NGAS)
   real(kind=f)                    :: t_orig(NZ)
   real(kind=f)                    :: scale_cldfrc(NZ)
+  integer                         :: rc_lcl             ! thread-local return code for OMP parallel iz loop
+  logical                         :: iz_ok              ! true while no error in current iz
+  real(kind=f)                    :: nretries_local     ! thread-local retry counter
+  real(kind=f)                    :: dtime_lcl          ! thread-local substep dtime
 !  real(kind=f)                    :: gasprod_tot(NGAS)		!PETER
 !  real(kind=f)                    :: rnucpeup_tot(NBIN,NELEM)	!PETER
 !  real(kind=f)                    :: rhompe_tot(NBIN,NELEM)	!PETER
@@ -150,42 +154,57 @@ subroutine newstate(carma, cstate, rc)
       told(:) = t(:)
     endif
 
+    ! Parallelizes the per-layer microphysics loop. Each iz slice of cstate arrays is
+    ! independent: all scratch fields now have iz as leading dimension (NZ was added in
+    ! Round 5B). Shared scalars dtime and nretries have benign races in the non-substepping
+    ! case (all threads write the same value); statistics are updated under CRITICAL.
+    ! NOTE: do_substep=.true. with varying ntsubsteps per-iz is not thread-safe due to the
+    ! shared dtime field; gate OMP behind CARMAPY_OPENMP only for do_substep=.false. runs.
+    !$OMP PARALLEL DO &
+    !$OMP& PRIVATE(iz, ntsubsteps, takeSteps, fraction, maxrate, warned, &
+    !$OMP&         isubstep, igas, ibin, ielem, igroup, sedlayer, pcd_last, &
+    !$OMP&         rc_lcl, iz_ok, nretries_local, dtime_lcl) &
+    !$OMP& SCHEDULE(dynamic)
     do iz = kb,ke,idk
+      rc_lcl = RC_OK
+      iz_ok  = .true.
 
       ! Compute or specify number of sub-timestep intervals for current spatial point
       ! (Could be same for all spatial pts, or could vary as a function of location)
       ntsubsteps = minsubsteps
-      
-      !call nsubsteps(carma, cstate, iz, dtime_orig, ntsubsteps, rc)
-      !if (rc <  RC_OK) return
-      
+
+      !call nsubsteps(carma, cstate, iz, dtime_orig, ntsubsteps, rc_lcl)
+      !if (rc_lcl <  RC_OK) ...
+
 	    !write(*,*) iz, ntsubsteps
 
       ! Grab sedimentation source for entire step for this layer
       ! and set accumlated source for underlying layer to zero
       sedlayer(:,:) = dpc_sed(:,:)
-      
+
       ! Do sub-timestepping for current spatial grid point, and allow for
       ! retrying should this level of substepping not be enough to keep the
       ! gas concentration from going negative.
-      nretries = 0._f
+      nretries_local = 0._f
       takeSteps = .true.
-      redugrow(:) = 1._f
-      
+      redugrow(:,iz) = 1._f
+
 
       !!!!!!!!!!!!!!!!!!!!!!! Start Substepping !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-      do while (takeSteps)
-      
+      do while (takeSteps .and. iz_ok)
+
         ! Compute sub-timestep time interval for current spatial grid point
-        dtime = dtime_orig / ntsubsteps
-        
+        ! Use a thread-local dtime to avoid data races on cstate%f_dtime when
+        ! different iz layers retry with different ntsubsteps.
+        dtime_lcl = dtime_orig / ntsubsteps
+
         ! Don't retry unless requested.
         takeSteps = .false.
 
         ! Reset the amount that has been collected to sedimented down to the
         ! layer below.
         dpc_sed(:,:) = 0._f
-        
+
         ! Reset the total nucleation for the step.
         pc_nucl(iz,:,:) = 0._f
 
@@ -193,7 +212,7 @@ subroutine newstate(carma, cstate, rc)
         if (do_detrain) then
           pcd_last(:,:) = pcd(iz,:,:)
         end if
-        
+
         ! Reset average heating rates.
         rlheat(iz)     = 0._f
         partheat(iz)   = 0._f
@@ -208,9 +227,11 @@ subroutine newstate(carma, cstate, rc)
           evaplg_tot(iz,:,:) = 0._f             !PETER
           rnucpe_tot(iz,:,:) = 0._f             !PETER
           evappe_tot(iz,:,:) = 0._f             !PETER
-        !end if				        !PETER 
+        !end if				        !PETER
         warned = 0
         do isubstep = 1,ntsubsteps
+          if (.not. iz_ok) exit   ! error detected in earlier substep
+
           ! If substepping, then increment the gas concentration and the temperature by
           ! an amount for one substep.
           if (do_substep) then
@@ -218,74 +239,81 @@ subroutine newstate(carma, cstate, rc)
             ! Since we don't really know how the gas and temperature changes arrived during the
             ! step, we can try different assumptions for how the gas and temperature are add to
             ! the values from the previous substep.
-  
+
             ! Linear increment for substepping.
             fraction     = 1._f / ntsubsteps
 
             do igas = 1,NGAS
               gc(iz,igas) = gc(iz,igas) + d_gc(iz,igas) * fraction
             enddo
-            
+
             t(iz) = t(iz) + d_t(iz) * fraction
-          
- 
+
+
             ! Detrainment puts the full gridbox amount into the incloud portion.
             if (do_detrain) then
               pc(iz,:,:)  = pc(iz,:,:)  + pcd_last(:,:) * fraction
               pcd(iz,:,:) = pcd(iz,:,:) - pcd_last(:,:) * fraction
             end if
           endif
-            
-  
+
+
           ! Redetermine maximum particle concentrations.
-          call maxconc(carma, cstate, iz, rc)
-          if (rc < RC_OK) return
+          call maxconc(carma, cstate, iz, rc_lcl)
+          if (rc_lcl < RC_OK) then
+            iz_ok = .false.
+            exit
+          end if
 
           ! Calculate changes in particle concentrations for current spatial point
           ! due to microphysical processes, part 2.  (faster microphysical calcs)
-          ! call microfast(carma, cstate, iz, rc)
+          ! call microfast(carma, cstate, iz, rc_lcl)
 
 
 
           !write(*,*) "before microfast"
           !write(*,*) isubstep, iz
-          call microfast(carma, cstate, iz, rc, maxrate, isubstep)                                     !PETER
-          if (rc < RC_OK) return
-          if (rc .eq. RC_WARNING) then 
+          call microfast(carma, cstate, iz, rc_lcl, maxrate, dtime_lcl, nretries_local)
+          if (rc_lcl < RC_OK) then
+            iz_ok = .false.
+            exit
+          end if
+          if (rc_lcl .eq. RC_WARNING) then
             if (warned .eq. 0) then
               write(*,*) "WARNING: In microfast"
               warned = 1
             endif
-            rc = RC_OK
+            rc_lcl = RC_OK
           end if
-          ! write(*,*) "after microfast", nretries
-                                               
-  
+          ! write(*,*) "after microfast", nretries_local
+
+
           ! If there was a retry warning message and substepping is enabled, then retry
           ! the operation with more substepping.
-          if (rc == RC_WARNING_RETRY) then
+          if (rc_lcl == RC_WARNING_RETRY) then
             if (do_substep) then
-          
-              ! Only retry for so long ...
-              nretries = nretries + 1
-              
-              if (nretries > maxretries) then
-                if (do_print) write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries - 1._f
-                write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries - 1._f
 
-                rc = RC_ERROR
+              ! Only retry for so long ...
+              nretries_local = nretries_local + 1
+
+              if (nretries_local > maxretries) then
+                if (do_print) write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries_local - 1._f
+                write(LUNOPRT,1) iz, isubstep, ntsubsteps, nretries_local - 1._f
+
+                rc_lcl = RC_ERROR
+                iz_ok  = .false.
                 exit
               end if
-            
+
               ! Try twice the substeps
               !
               ! NOTE: We are going to rely upon retries, so don't clutter the log
               ! with retry print statements. They slow down the run.
               ntsubsteps = ntsubsteps * 2
               ! maxrate = maxrate / 2                  !PETER
-              
+
               !if (do_print) write(LUNOPRT,*) "newstate::WARNING - Substep failed, retrying with ", ntsubsteps, " substeps."
-  
+
               ! Reset the state to the beginning of the step
               pc(iz,:,:) = pcl(iz,:,:)
               pcd(iz,:,:) = pcd_last(:,:)
@@ -293,57 +321,68 @@ subroutine newstate(carma, cstate, rc)
               do igas = 1,NGAS
                 gc(iz,igas) = gcl(iz,igas)
 
-                ! Now that we have reset the gas concentration, we need to recalculate the supersaturation.  
-                call supersat(carma, cstate, iz, igas, rc)
-                if (rc < RC_OK) return
+                ! Now that we have reset the gas concentration, we need to recalculate the supersaturation.
+                call supersat(carma, cstate, iz, igas, rc_lcl)
+                if (rc_lcl < RC_OK) then
+                  iz_ok = .false.
+                  exit
+                end if
               end do
-              
-              rc = RC_OK
-              takeSteps = .true.
+
+              if (iz_ok) then
+                rc_lcl = RC_OK
+                takeSteps = .true.
+              end if
               exit
-              
-              
+
+
             ! If substepping is not enabled, than the retry warning should be treated as an error.
             else
-            
+
               if (do_print) write(LUNOPRT,*) "newstate::ERROR - Step failed, suggest enabling substepping."
-              rc = RC_ERROR
+              rc_lcl = RC_ERROR
+              iz_ok  = .false.
               exit
-            end if            
+            end if
           end if
 
           do igas = 1, NGAS                                                                                         !PETER
-              gasprod_tot(iz,igas) = gasprod_tot(iz,igas) + gasprod(igas)*dtime                                     !PETER
+              gasprod_tot(iz,igas) = gasprod_tot(iz,igas) + gasprod(igas,iz)*dtime_lcl                               !PETER
           end do                                                                                                    !PETER
           do ielem = 1, NELEM                                                                                       !PETER
-            do ibin = 1, NBIN                                                                                       !PETER	
+            do ibin = 1, NBIN                                                                                       !PETER
               igroup = igelem(ielem)                                                                                !PETER
-              rnucpeup_tot(iz,ibin,ielem) = rnucpeup_tot(iz,ibin,ielem) + rnucpeup(ibin,ielem)*dtime                !PETER
-              rhompe_tot(iz,ibin,ielem) = rhompe_tot(iz,ibin,ielem) + rhompe(ibin,ielem)*dtime                      !PETER
-              growpe_tot(iz,ibin,ielem) = growpe_tot(iz,ibin,ielem) + growpe(ibin,ielem)*dtime                      !PETER
+              rnucpeup_tot(iz,ibin,ielem) = rnucpeup_tot(iz,ibin,ielem) + rnucpeup(ibin,ielem,iz)*dtime_lcl         !PETER
+              rhompe_tot(iz,ibin,ielem) = rhompe_tot(iz,ibin,ielem) + rhompe(ibin,ielem,iz)*dtime_lcl               !PETER
+              growpe_tot(iz,ibin,ielem) = growpe_tot(iz,ibin,ielem) + growpe(ibin,ielem,iz)*dtime_lcl               !PETER
               rnuclg_tot(iz,ibin,igroup) = rnuclg_tot(iz,ibin,igroup) + &
-                    sum(rnuclg(ibin,igroup,:))*pc_psolve(iz,ibin,ielem)*dtime !PETER
-              growlg_tot(iz,ibin,igroup) = growlg_tot(iz,ibin,igroup) + growlg(ibin,igroup)*pc_psolve(iz,ibin,ielem)*dtime  !PETER
-                !write(*,*) iz,ibin,ielem,igroup,growlg(ibin,igroup), pc_psolve(iz,ibin,ielem), dtime
-              evaplg_tot(iz,ibin,igroup) = evaplg_tot(iz,ibin,igroup) + evaplg(ibin,igroup)*pc_psolve(iz,ibin,ielem)*dtime  !PETER
-              rnucpe_tot(iz,ibin,ielem) = rnucpe_tot(iz,ibin,ielem) + rnucpe(ibin,ielem)*dtime                              !PETER
-              evappe_tot(iz,ibin,ielem) = evappe_tot(iz,ibin,ielem) + evappe(ibin,ielem)*dtime                              !PETER
+                    sum(rnuclg(ibin,igroup,:,iz))*pc_psolve(iz,ibin,ielem)*dtime_lcl !PETER
+              growlg_tot(iz,ibin,igroup) = growlg_tot(iz,ibin,igroup) + growlg(ibin,igroup,iz)*pc_psolve(iz,ibin,ielem)*dtime_lcl  !PETER
+                !write(*,*) iz,ibin,ielem,igroup,growlg(ibin,igroup,iz), pc_psolve(iz,ibin,ielem), dtime_lcl
+              evaplg_tot(iz,ibin,igroup) = evaplg_tot(iz,ibin,igroup) + evaplg(ibin,igroup,iz)*pc_psolve(iz,ibin,ielem)*dtime_lcl  !PETER
+              rnucpe_tot(iz,ibin,ielem) = rnucpe_tot(iz,ibin,ielem) + rnucpe(ibin,ielem,iz)*dtime_lcl                              !PETER
+              evappe_tot(iz,ibin,ielem) = evappe_tot(iz,ibin,ielem) + evappe(ibin,ielem,iz)*dtime_lcl                              !PETER
             end do                                                                                                          !PETER
           end do
 
         end do
       end do
 
-      ! Keep track of substepping and retry statistics for performance tuning.
+      ! Merge per-iz error code and statistics into shared cstate fields.
+      !$OMP CRITICAL
+      if (rc_lcl < rc) rc = rc_lcl
       max_nsubstep = max(max_nsubstep, ntsubsteps)
-      max_nretry   = max(max_nretry, nretries)
-
+      max_nretry   = max(max_nretry, nretries_local)
       nstep    = nstep    + 1._f
       nsubstep = nsubstep + ntsubsteps
-      nretry   = nretry   + nretries
+      nretry   = nretry   + nretries_local
+      !$OMP END CRITICAL
 
       if (do_substep) zsubsteps(iz) = ntsubsteps
     end do
+    !$OMP END PARALLEL DO
+
+    if (rc < RC_OK) return
 
     ! if (do_printdiag) write(lundiag,*) ' '		!PETER
 

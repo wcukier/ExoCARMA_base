@@ -61,7 +61,7 @@ subroutine freezdropl(carma, cstate, iz, rc)
       
               ! Temporary simple kludge: Set <rnuclg> to 1.e2 if T < -40C
               if( t(iz) .lt. T0-40._f ) then
-                rnuclg(ibin,igroup,ignucto) = 1.e2_f
+                rnuclg(ibin,igroup,ignucto,iz) = 1.e2_f
               endif
       
             endif     ! pc(source particles) .gt. FEW_PC

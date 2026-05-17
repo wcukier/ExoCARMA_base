@@ -190,7 +190,7 @@ subroutine freezaerl_koop2000(carma, cstate, iz, rc)
                       volrat = rhosol(isol) / RHO_W * ((100._f - WT) / WT) + 1._f
                     endif
 
-                    rnuclg(ibin,igroup,ignucto) = rnuclg(ibin,igroup,ignucto) &
+                    rnuclg(ibin,igroup,ignucto,iz) = rnuclg(ibin,igroup,ignucto,iz) &
 			+ rjj * volrat * vol(ibin,igroup)                ! [s-1]
                   endif   ! ssi > sifreeze .and. target droplets not evaporating
                 enddo    ! ibin = 1,NBIN

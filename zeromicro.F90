@@ -33,20 +33,29 @@ subroutine zeromicro(carma, cstate, iz, rc)
   
   if (do_grow) then
 
-    phprod         = 0._f
-    rlprod         = 0._f
+    phprod(iz)     = 0._f
+    rlprod(iz)     = 0._f
     dtpart(iz,:,:) = 0._f
 
-    if (NGAS > 0) gasprod(:) = 0._f
+    if (NGAS > 0) gasprod(:,iz) = 0._f
 
-    rhompe(:, :)  = 0._f
-    rnucpe(:,:)   = 0._f
-    rnucpeup(:,:) = 0._f		!PETER
-    growpe(:,:)   = 0._f
-    evappe(:,:)   = 0._f
-    rnuclg(:,:,:) = 0._f
-    growlg(:,:)   = 0._f
-    evaplg(:,:)   = 0._f
+    rhompe(:,:,iz)  = 0._f
+    rnucpe(:,:,iz)   = 0._f
+    rnucpeup(:,:,iz) = 0._f		!PETER
+    growpe(:,:,iz)   = 0._f
+    evappe(:,:,iz)   = 0._f
+    rnuclg(:,:,:,iz) = 0._f
+    rnuclgsum(:,:,iz) = 0._f
+    growlg(:,:,iz)   = 0._f
+    evaplg(:,:,iz)   = 0._f
+
+    coreavg(iz)   = 0._f
+    evdrop(iz)    = 0._f
+    coresig(iz)   = 0._f
+    evcore(:,iz)  = 0._f
+    too_small(iz) = .false.
+    too_big(iz)   = .false.
+    nuc_small(iz) = .false.
 
   end if
 

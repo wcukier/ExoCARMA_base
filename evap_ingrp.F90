@@ -38,7 +38,7 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
  ! write(*,*) 'ingrp', iz, ibin, ig, ip
 
   ! For a single group, the core mass fraction is 0.
-  cmf(ibin,ig) = 0.0_f
+  cmf(ibin,ig,iz) = 0.0_f
   
   ! The smallest bin cannot be a source to smaller bins in same group
   if( ibin .eq. 1 )then
@@ -48,8 +48,8 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
   ! Evaluate evaporation source term <evappe> for all elements in group
   do isub = 1, nelemg(ig)
     ie = ip + isub - 1
-    evappe(ibin-1,ie) = evappe(ibin-1,ie) + &
-      pc(iz,ibin,ie)*evaplg(ibin,ig)
+    evappe(ibin-1,ie,iz) = evappe(ibin-1,ie,iz) + &
+      pc(iz,ibin,ie)*evaplg(ibin,ig,iz)
     !write(*,*) 'ingrp', iz, ig, isub, ie, ibin, evappe(ibin-1,ie), pc(iz,ibin,ie), evaplg(ibin,ig)
   enddo
 
