@@ -190,7 +190,7 @@ subroutine setupatm(carma, cstate, rescale, rplanet, rc)
 !  thcond(:)  = (1520._f + 7.65_f*(t(:) - T0))                  !PETER: thermal conductivity of C02 from handbook of chemistry and physics
   ! H2 atmosphere from Thermophysical Properties of Fluids section of the Handbook of Chemistry and Physics, by Eric W. Lemmon.
   ! thcond(:) = 100._f * (71.4857_f + 0.3912_f * t(:) + 3.1607e-5_f * t(:)**2._f) !TODO WC
-  thcond(:) = thcond_0 + thcond_1 * t(:) + thcond_2 * t(:)**2._f !WC
+  thcond(:) = thcond_0 + thcond_1 * t(:) + thcond_2 * t(:)**2 !WC
 
 
 

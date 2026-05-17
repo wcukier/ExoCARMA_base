@@ -73,21 +73,21 @@ subroutine homnucgen(carma,cstate, iz, rc)
         nucrate = 0._f
       else
         ! F (Gao 2017 Eqn A.2)
-        deltafg = 4._f / 3._f * PI * surftens * agnuc**2._f 		! For user's choice condensate only  
+        deltafg = 4._f / 3._f * PI * surftens * agnuc**2 		! For user's choice condensate only  
         
         ! Gao 2017 Eqn A.4 (note typo in paper: p is *partial* pressure)
         fluxmol = gc_cgs * rvap * t(iz) / sqrt(2._f * PI * &
         (gwtmol_dif(igas) / AVG) * BK * t(iz))
 
         ! g (number of molecules in a particle with radius a_c)
-        molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3._f &
+        molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3 &
         / gwtmol(igas) * AVG
         
-        cmass = 4._f / 3._f * PI * agnuc**3._f * rho_cond
+        cmass = 4._f / 3._f * PI * agnuc**3 * rho_cond
 
         ! Gao 2017 Eqn A.1
-        nucrate = 4._f * PI * agnuc**2._f * fluxmol &
-	      * sqrt(deltafg / (3._f * PI * BK * t(iz) * molgerm**2._f)) & ! Z (Eqn A.5)
+        nucrate = 4._f * PI * agnuc**2 * fluxmol &
+	      * sqrt(deltafg / (3._f * PI * BK * t(iz) * molgerm**2)) & ! Z (Eqn A.5)
          * (gc_cgs / gwtmol_dif(igas) * AVG) * & ! n
   	    exp( -1._f * deltafg / (BK * t(iz)))
 

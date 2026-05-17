@@ -396,6 +396,7 @@ module carma_types_mod
     logical                                       :: f_do_print_init
     logical                                       :: f_do_step
     logical                                       :: f_do_substep
+    logical                                       :: f_do_t_evolves    !! .true. if temperature evolves between steps (e.g. radiative coupling). When .false., setupgkern caches its outputs after the first call.
     logical                                       :: f_do_thermo
     logical                                       :: f_do_cnst_rlh
     logical, allocatable, dimension(:,:)          :: f_if_nuc       !(NELEM,NELEM)

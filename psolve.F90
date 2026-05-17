@@ -49,7 +49,6 @@ subroutine psolve(carma, cstate, iz, ibin, ielem, rc)
   real(kind=f)                   :: sed_rate
   real(kind=f)                   :: rnuclgtot
   real(kind=f)                   :: dsed
-  real(kind=f)                   :: xyzmet(NZ)
 
 
   ! Define current group & particle number concentration element indices
@@ -57,10 +56,7 @@ subroutine psolve(carma, cstate, iz, ibin, ielem, rc)
   iepart = ienconc(igroup)
 
   if(do_grow) then
-	
-	! Metric scaling factor
-    xyzmet = xmet(:) * ymet(:) * zmet(:)
-	
+
     ! Compute total production rate
     ppd = rnucpe(ibin,ielem) + rhompe(ibin,ielem)  + growpe(ibin,ielem)  + evappe(ibin,ielem) + phochemprod(iz,ibin,ielem)
     !ppd = rnucpe(ibin,ielem)/ xyzmet(iz) + rhompe(ibin,ielem)/ xyzmet(iz)  + growpe(ibin,ielem)/ xyzmet(iz)  + evappe(ibin,ielem)/ xyzmet(iz)  + phochemprod(iz,ibin,ielem)/ xyzmet(iz) 

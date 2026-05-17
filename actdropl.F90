@@ -162,7 +162,7 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
                       osfreq = 1.6e11_f * sqrt(desorption(igas)*EV2ERG/BK/gwtmol_dif(igas)) 
 
                       ! F - Gao 2017 Eqn A.3
-                      deltafg = 4._f / 3._f * PI * surftens * agnuc**2._f 		! For user's choice condensate only 
+                      deltafg = 4._f / 3._f * PI * surftens * agnuc**2 		! For user's choice condensate only 
 
                       ! Φ - Gao 2017 A.4
 	                    fluxmol = gc_cgs * rvap * t(iz) / sqrt(2._f * PI * &
@@ -173,34 +173,34 @@ subroutine actdropl(carma, cstate, iz, rc, maxrate)           !PETER
 	                      EV2ERG / (BK * t(iz)))
 
                       ! g (number of molecules in a particle with radius a_c)
-	                    molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3._f &
+	                    molgerm = 4._f / 3._f * PI * rho_cond * agnuc**3 &
 	                      / gwtmol(igas) * AVG
 
 	                    radratio = r(ibin,igroup)/agnuc
                       
                       ! Gao 2017 Eqn A.9
-  	                  phi = sqrt(1._f - 2._f * imucos * radratio + radratio**2._f)
+  	                  phi = sqrt(1._f - 2._f * imucos * radratio + radratio**2)
 	                    fo = (radratio - imucos) / phi !Gao 2017 A.10
-	                    temp1 = 2._f - 3._f*fo + fo**3._f
+	                    temp1 = 2._f - 3._f*fo + fo**3
 
 	                    if (log10(abs(temp1)) < -15._f) temp1 = 0._f
 
                       ! f - Gao 2017 Eqn A.7
 	                    curvfact = 0.5_f *(1._f + ((1._f - &
-	 	                    imucos*radratio)/phi)**3._f + radratio**3._f * &
+	 	                    imucos*radratio)/phi)**3 + radratio**3 * &
 		                    temp1 + 3._f * imucos * &
-	                      radratio**2._f * (fo - 1._f))
+	                      radratio**2 * (fo - 1._f))
 
                       ! H. Vehkamaki, et al. 2007, Technical Note: The heterogeneous Zeldovich factor, Atmos. Chem. Phys., 7, 309-313, 2007
                       zv = sqrt(deltafg &
-	  	                  / (3._f * PI * BK * t(iz) * molgerm**2._f)) * &
+	  	                  / (3._f * PI * BK * t(iz) * molgerm**2)) * &
 	                      sqrt(4._f/(2._f + ((1._f - imucos*radratio) * &
-	 	                    (2._f - 4._f*imucos*radratio - (imucos**2._f - &
-		                    3._f)*radratio**2._f)) / phi**3._f)) 		    
+	 	                    (2._f - 4._f*imucos*radratio - (imucos**2 - &
+		                    3._f)*radratio**2)) / phi**3)) 		    
                       
                         ! Gao 2017 A.6
-                      rnuclg(ibin,igroup,ignucto) = (4._f * PI**2._f * r(ibin,igroup)**2._f * &
-                        agnuc**2._f * fluxmol * surfcond * &
+                      rnuclg(ibin,igroup,ignucto) = (4._f * PI**2 * r(ibin,igroup)**2 * &
+                        agnuc**2 * fluxmol * surfcond * &
                         zv * exp( -1._f * deltafg * &
                         curvfact / (BK * t(iz))))! * redugrow(igas)
 

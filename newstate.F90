@@ -240,7 +240,7 @@ subroutine newstate(carma, cstate, rc)
           ! Redetermine maximum particle concentrations.
           call maxconc(carma, cstate, iz, rc)
           if (rc < RC_OK) return
-          
+
           ! Calculate changes in particle concentrations for current spatial point
           ! due to microphysical processes, part 2.  (faster microphysical calcs)
           ! call microfast(carma, cstate, iz, rc)
@@ -329,11 +329,10 @@ subroutine newstate(carma, cstate, rc)
               rnucpe_tot(iz,ibin,ielem) = rnucpe_tot(iz,ibin,ielem) + rnucpe(ibin,ielem)*dtime                              !PETER
               evappe_tot(iz,ibin,ielem) = evappe_tot(iz,ibin,ielem) + evappe(ibin,ielem)*dtime                              !PETER
             end do                                                                                                          !PETER
-          end do   
+          end do
+
         end do
       end do
-
-
 
       ! Keep track of substepping and retry statistics for performance tuning.
       max_nsubstep = max(max_nsubstep, ntsubsteps)
@@ -342,12 +341,12 @@ subroutine newstate(carma, cstate, rc)
       nstep    = nstep    + 1._f
       nsubstep = nsubstep + ntsubsteps
       nretry   = nretry   + nretries
-      
+
       if (do_substep) zsubsteps(iz) = ntsubsteps
     end do
 
     ! if (do_printdiag) write(lundiag,*) ' '		!PETER
-  
+
     ! Restore normal timestep
     dtime = dtime_orig
     

@@ -47,6 +47,9 @@ subroutine coagp(carma, cstate, ibin, ielem, rc)
   real(kind=f)                   :: elemass
   real(kind=f)                   :: rmi
   real(kind=f)                   :: rmj
+  real(kind=f)                   :: pkern_val   ! iz-invariant pkernel(i,j,ig,jg,igrp,i_pkern) lookup
+  logical                        :: rmi_iz_dep  ! true only in mixed-CN-with-cores branch
+  logical                        :: is_core2mom
 
 
   ! Definition of i,j,k,n used in comments: colision between i and j bins
@@ -70,9 +73,9 @@ subroutine coagp(carma, cstate, ibin, ielem, rc)
     jg = jgup(igrp,ibin,iquad)           ! source group
     i  = iup(igrp,ibin,iquad)            ! source bin
     j  = jup(igrp,ibin,iquad)            ! source bin
-  
+
     iefrom = icoagelem(ielem,ig)         ! source element for <i> particle
-    
+
     if( if_sec_mom(igrp) )then
       iefrom_cm = icoagelem_cm(ielem,ig)        ! core mass moment source element
     endif
@@ -81,92 +84,98 @@ subroutine coagp(carma, cstate, ibin, ielem, rc)
     if( iefrom .ne. 0 ) then
 
       je = ienconc(jg)                   ! source element for <j> particle
-  
+
       if( if_sec_mom(igrp) )then
         je_cm = icoagelem_cm(ielem,jg)           ! core mass moment source element
       endif
-        
-      ! If ielem is core mass type and <ig> is a CN type and <ig> is different
-      ! from <igrp>, then we must multiply production by mass
-      ! per particle (<rmi>) of element <icoagelem>.  (this is <rmass> for all source
-      ! elements except particle number concentration in a multicomponent CN group).
+
+      ! ===== Hoisted (iz-invariant) decision tree =====
+      ! i_pkern, rmi (almost always), rmj, and the CORE2MOM branch all depend only
+      ! on quantities that do not vary with iz: element/group types, ncore, icomp,
+      ! rmass. Compute them once per iquad.
+      rmi = 1._f
+      rmj = 1._f
+      i_pkern = 1
+      rmi_iz_dep = .false.
+
+      if( itype(ielem) .eq. I_COREMASS .or. &
+          itype(ielem) .eq. I_VOLCORE )then          ! core mass
+
+        i_pkern = 3        ! Use different kernel for core mass prod.
+
+        if( ( itype(ienconc(ig)) .eq. I_INVOLATILE .or. &
+              itype(ienconc(ig)) .eq. I_VOLATILE ) &
+            .and. ig .ne. igrp ) then
+
+            ! CN source and ig different from igrp
+
+          if( ncore(ig) .eq. 0 )then        ! No cores in source group
+
+            if(icomp(ienconc(ig)) .eq. icomp(ielem)) then
+              rmi = rmass(i,ig)
+            else
+              rmi = 0._f
+            endif
+
+          elseif( itype(iefrom) .eq. I_INVOLATILE .or. &
+                  itype(iefrom) .eq. I_VOLATILE ) then
+
+            ! Source element is number concentration elem of mixed CN group;
+            ! rmi depends on per-iz pc(iz,...) values, so defer to the inner loop.
+            rmi_iz_dep = .true.
+          endif
+        endif  ! ig is a CCN and not igrp
+
+      elseif( itype(ielem) .eq. I_CORE2MOM )then      ! core mass^2
+
+        i_pkern = 5    ! Use different kernel for core mass^2 production
+
+        if( itype(ienconc(ig)) .eq. I_INVOLATILE ) then
+          rmi = rmass(i,ig)
+          rmj = rmass(j,jg)
+        endif
+
+      endif  ! itype(ielem) is a coremass or core2mom
+
+      pkern_val   = pkernel(i,j,ig,jg,igrp,i_pkern)
+      is_core2mom = (itype(ielem) .eq. I_CORE2MOM)
+
+      ! ===== Inner iz loop (lean) =====
       do iz = 1, NZ
 
         ! Bypass calculation if few source particles present
         if( pconmax(iz,ig) .gt. FEW_PC .and. &
             pconmax(iz,jg) .gt. FEW_PC )then
 
-          rmi = 1._f
-          i_pkern = 1
-
-          if( itype(ielem) .eq. I_COREMASS .or. &
-              itype(ielem) .eq. I_VOLCORE )then          ! core mass
-
-            i_pkern = 3        ! Use different kernel for core mass prod.
-
-            if( ( itype(ienconc(ig)) .eq. I_INVOLATILE .or. &
-                  itype(ienconc(ig)) .eq. I_VOLATILE ) &
-                .and. ig .ne. igrp ) then 
-
-                ! CN source and ig different from igrp
-
-              if( ncore(ig) .eq. 0 )then        ! No cores in source group
-
-                if(icomp(ienconc(ig)) .eq. icomp(ielem)) then
-                  rmi = rmass(i,ig)
-                else
-                  rmi = 0._f
-                endif
-
-              elseif( itype(iefrom) .eq. I_INVOLATILE .or. &
-                      itype(iefrom) .eq. I_VOLATILE ) then
-
-                !  Source element is number concentration elem of mixed CN group
-                totmass  = pc(iz,i,iefrom) * rmass(i,ig) ! TODO: Check Units
-                rmasscore = pc(iz,i,icorelem(1,ig))
-                
-                do ic = 2,ncore(ig)
-                  iecore = icorelem(ic,ig)
-                  rmasscore = rmasscore + pc(iz,i,iecore)
-                enddo
-                
-                fracmass = 1._f - rmasscore/totmass
-                elemass  = fracmass * rmass(i,ig)
-                rmi = elemass
-              endif
-            endif  ! ig is a CCN and not igrp
-
-          elseif( itype(ielem) .eq. I_CORE2MOM )then      ! core mass^2
-
-            i_pkern = 5    ! Use different kernel for core mass^2 production
-            rmj = 1._f
-
-            if( itype(ienconc(ig)) .eq. I_INVOLATILE ) then
-              rmi = rmass(i,ig)
-              rmj = rmass(j,jg)
-            endif
-
-          endif  ! itype(ielem) is a coremass or core2mom
+          if( rmi_iz_dep ) then
+            ! Mixed-CN-with-cores: rmi from per-iz mass fractions.
+            totmass  = pc(iz,i,iefrom) * rmass(i,ig) ! TODO: Check Units
+            rmasscore = pc(iz,i,icorelem(1,ig))
+            do ic = 2,ncore(ig)
+              iecore = icorelem(ic,ig)
+              rmasscore = rmasscore + pc(iz,i,iecore)
+            enddo
+            fracmass = 1._f - rmasscore/totmass
+            rmi = fracmass * rmass(i,ig)
+          endif
 
           ! For each spatial grid point, sum up coagulation production
           ! contributions from each quad.
-          if( itype(ielem) .ne. I_CORE2MOM )then
+          if( .not. is_core2mom )then
             coagpe(iz,ibin,ielem) = coagpe(iz,ibin,ielem) + &
               pc(iz,i,iefrom)*pcl(iz,j,je)*rmi * &
-              ckernel(iz,i,j,ig,jg) * &
-              pkernel(i,j,ig,jg,igrp,i_pkern) 
+              ckernel(iz,i,j,ig,jg) * pkern_val
           else
             coagpe(iz,ibin,ielem) = coagpe(iz,ibin,ielem) + &
               ( pc(iz,i,iefrom)*pcl(iz,j,je)*rmi**2 + &
               pc(iz,i,iefrom_cm)*rmi* &
               pcl(iz,j,je_cm)*rmj ) * &
-              ckernel(iz,i,j,ig,jg) * &
-              pkernel(i,j,ig,jg,igrp,i_pkern) 
+              ckernel(iz,i,j,ig,jg) * pkern_val
           endif
         endif    ! end of ( pconmax .gt. FEW_PC )
       enddo    ! iz = 1, NZ
     endif  ! iefrom .ne. 0
-  enddo  ! iquad 
+  enddo  ! iquad
 
   ! Next, loop over group-bin quads for production in bin <ibin> = k from
   ! bin <i> due to collision between bins <i> and <j>.
@@ -177,85 +186,92 @@ subroutine coagp(carma, cstate, ibin, ielem, rc)
     jg = jglow(igrp,ibin,iquad)
     i  = ilow(igrp,ibin,iquad)
     j  = jlow(igrp,ibin,iquad)
-  
+
     iefrom = icoagelem(ielem,ig)          ! source element for <i> particle
-  
+
     if( if_sec_mom(igrp) )then
       iefrom_cm = icoagelem_cm(ielem,ig)        ! core mass moment source element
     endif
 
     if( iefrom .ne. 0 ) then
-  
+
       je = ienconc(jg)                    ! source element for <j> particle
-  
+
       if( if_sec_mom(igrp) )then
         je_cm = icoagelem_cm(ielem,jg)           ! core mass moment source element
       endif
-        
+
+      ! ===== Hoisted (iz-invariant) decision tree =====
+      rmi = 1._f
+      rmj = 1._f
+      i_pkern = 2
+      rmi_iz_dep = .false.
+
+      if( itype(ielem) .eq. I_COREMASS .or. &
+          itype(ielem) .eq. I_VOLCORE )then          ! core mass
+
+        i_pkern = 4     ! Use different kernel for core mass production
+
+        if( ( itype(ienconc(ig)) .eq. I_INVOLATILE .or. &
+              itype(ienconc(ig)) .eq. I_VOLATILE ) &
+            .and. ig .ne. igrp ) then
+
+          ! CN source and ig different from igrp
+
+          if( ncore(ig) .eq. 0 )then          ! No cores in source group
+            rmi = rmass(i,ig)
+
+          elseif( itype(iefrom) .eq. I_INVOLATILE .or. &
+                  itype(iefrom) .eq. I_VOLATILE ) then
+
+            ! Mixed CN with cores: rmi depends on per-iz pc(iz,...); defer.
+            rmi_iz_dep = .true.
+
+          endif  ! pure CN group or CN group w/ cores
+
+        endif  ! src group is CN and different from the target group
+
+      elseif( itype(ielem) .eq. I_CORE2MOM )then      ! core mass^2
+
+        i_pkern = 6   ! Use different kernel for core mass^2 production
+        if( itype(ienconc(ig)) .eq. I_INVOLATILE ) then
+          rmi = rmass(i,ig)
+          rmj = rmass(j,jg)
+        endif
+      endif  ! itype(ielem)
+
+      pkern_val   = pkernel(i,j,ig,jg,igrp,i_pkern)
+      is_core2mom = (itype(ielem) .eq. I_CORE2MOM)
+
+      ! ===== Inner iz loop (lean) =====
       do iz = 1, NZ
 
         ! Bypass calculation if few particles present
         if( pconmax(iz,ig) .gt. FEW_PC .and. &
             pconmax(iz,jg) .gt. FEW_PC )then
 
-          rmi = 1._f
-          i_pkern = 2
+          if( rmi_iz_dep ) then
+            ! Mixed-CN-with-cores: rmi from per-iz mass fractions.
+            totmass  = pc(iz,i,iefrom) * rmass(i,ig)
+            rmasscore = pc(iz,i,icorelem(1,ig))
+            do ic = 2,ncore(ig)
+              iecore = icorelem(ic,ig)
+              rmasscore = rmasscore + pc(iz,i,iecore)
+            enddo
+            fracmass = 1._f - rmasscore/totmass
+            rmi = fracmass * rmass(i,ig)
+          endif
 
-          if( itype(ielem) .eq. I_COREMASS .or. &
-              itype(ielem) .eq. I_VOLCORE )then          ! core mass
-
-            i_pkern = 4     ! Use different kernel for core mass production
-
-            if( ( itype(ienconc(ig)) .eq. I_INVOLATILE .or. &
-                  itype(ienconc(ig)) .eq. I_VOLATILE ) &
-                .and. ig .ne. igrp ) then 
-
-              ! CN source and ig different from igrp
-
-              if( ncore(ig) .eq. 0 )then          ! No cores in source group
-                rmi = rmass(i,ig)
-
-              elseif( itype(iefrom) .eq. I_INVOLATILE .or. &
-                      itype(iefrom) .eq. I_VOLATILE ) then
-
-                ! Source element is number concentration elem of mixed CN group
-
-                totmass  = pc(iz,i,iefrom) * rmass(i,ig)
-                rmasscore = pc(iz,i,icorelem(1,ig))
-                do ic = 2,ncore(ig)
-                  iecore = icorelem(ic,ig)
-                  rmasscore = rmasscore + pc(iz,i,iecore)
-                enddo
-                fracmass = 1._f - rmasscore/totmass
-                elemass  = fracmass * rmass(i,ig)
-                rmi = elemass
-
-              endif  ! pure CN group or CN group w/ cores
-
-            endif  ! src group is CN and different from the target group
-
-          elseif( itype(ielem) .eq. I_CORE2MOM )then      ! core mass^2
-
-            i_pkern = 6   ! Use different kernel for core mass^2 production
-            rmj = 1._f
-            if( itype(ienconc(ig)) .eq. I_INVOLATILE ) then
-              rmi = rmass(i,ig)
-              rmj = rmass(j,jg)
-            endif
-          endif  ! itype(ielem)
-
-          if( itype(ielem) .ne. I_CORE2MOM )then
+          if( .not. is_core2mom )then
            coagpe(iz,ibin,ielem) = coagpe(iz,ibin,ielem) + &
                 pc(iz,i,iefrom)*pcl(iz,j,je)*rmi * &
-                ckernel(iz,i,j,ig,jg) * &
-                pkernel(i,j,ig,jg,igrp,i_pkern)
+                ckernel(iz,i,j,ig,jg) * pkern_val
           else
            coagpe(iz,ibin,ielem) = coagpe(iz,ibin,ielem) + &
                 ( pc(iz,i,iefrom)*pcl(iz,j,je)*rmi**2 + &
                   pc(iz,i,iefrom_cm)*rmi* &
                   pcl(iz,j,je_cm)*rmj ) * &
-                ckernel(iz,i,j,ig,jg) * &
-                pkernel(i,j,ig,jg,igrp,i_pkern)
+                ckernel(iz,i,j,ig,jg) * pkern_val
           endif
         endif    ! end of ( pconmax .gt. FEW_PC )
       enddo    ! iz = 1, NZ

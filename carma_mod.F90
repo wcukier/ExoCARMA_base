@@ -345,7 +345,7 @@ contains
       do_grow, do_incloud, do_explised, do_print_init, do_substep, do_thermo, do_vdiff, &
       do_vtran, do_drydep, vf_const, minsubsteps, maxsubsteps, maxretries, conmax, &
       do_pheat, do_pheatatm, dt_threshold, cstick, gsticki, gstickl, tstick, itbnd_pc, &
-      ibbnd_pc, itbnd_gc, ibbnd_gc)
+      ibbnd_pc, itbnd_gc, ibbnd_gc, do_t_evolves)
     type(carma_type), intent(inout)     :: carma         !! the carma object
     integer, intent(out)                :: rc            !! return code, negative indicates failure
     logical, intent(in), optional       :: do_cnst_rlh   !! use constant values for latent heats (instead of varying with temperature)?
@@ -377,7 +377,8 @@ contains
     integer, intent(in), optional       :: ibbnd_pc      !! bottom boundary condition for particles
     integer, intent(in), optional       :: itbnd_gc      !! top boundary condition for gases
     integer, intent(in), optional       :: ibbnd_gc      !! bottom boundary condition for gases
-    
+    logical, intent(in), optional       :: do_t_evolves  !! .true. if T evolves between steps (disables setupgkern caching)
+
     ! Assume success.
     rc = RC_OK
 
@@ -393,6 +394,7 @@ contains
     carma%f_do_pheatatm   = .FALSE.
     carma%f_do_print_init = .FALSE.
     carma%f_do_substep    = .FALSE.
+    carma%f_do_t_evolves  = .FALSE.
     carma%f_do_thermo     = .FALSE.
     carma%f_do_vdiff      = .FALSE.
     carma%f_do_vtran      = .FALSE.
@@ -419,6 +421,7 @@ contains
     if (present(do_pheatatm))   carma%f_do_pheatatm   = do_pheatatm
     if (present(do_print_init)) carma%f_do_print_init = (do_print_init .and. carma%f_do_print)
     if (present(do_substep))    carma%f_do_substep    = do_substep
+    if (present(do_t_evolves))  carma%f_do_t_evolves  = do_t_evolves
     if (present(do_thermo))     carma%f_do_thermo     = do_thermo
     if (present(do_vdiff))      carma%f_do_vdiff      = do_vdiff
     if (present(do_vtran))      carma%f_do_vtran      = do_vtran 

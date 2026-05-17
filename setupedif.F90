@@ -93,7 +93,7 @@ subroutine setupedif(carma, cstate, rc)
   ! Non--cartesion coordinates are assumed to be positive downward, but
   ! vertical velocities in this model are always assumed to be positive upward. 
   if( igridv .ne. I_CART )then
-    ekz(:) = ekz(:) / (zmetl(:)**2._f)
+    ekz(:) = ekz(:) / (zmetl(:)**2)
   endif
 
   ! Return to caller with fall velocities evaluated.

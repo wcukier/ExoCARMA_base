@@ -107,7 +107,7 @@ subroutine setupbdif(carma, cstate, rc)
   if( igridv .ne. I_CART )then
     do igroup=1,NGROUP
       do ibin=1,NBIN
-        dkz(:,ibin,igroup) = dkz(:,ibin,igroup) / (zmetl(:)**2._f)
+        dkz(:,ibin,igroup) = dkz(:,ibin,igroup) / (zmetl(:)**2)
       enddo
     enddo
   endif

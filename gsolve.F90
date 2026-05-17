@@ -1,4 +1,4 @@
-p[! Include shortname defintions, so that the F77 code does not have to be modified to
+! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
 

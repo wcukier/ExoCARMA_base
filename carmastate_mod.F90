@@ -239,7 +239,7 @@ contains
     call setupatm(carma_ptr, cstate, carma_ptr%f_do_fixedinit, rplanet, rc)
     if (rc < 0) return
     
-    cstate%f_ekz(:)  = ekz(:)/ (cstate%f_zmetl(:)**2._f)			!PETER !DPOW
+    cstate%f_ekz(:)  = ekz(:)/ (cstate%f_zmetl(:)**2)			!PETER !DPOW
 
     ! Set the realtive humidity. If necessary, it will be calculated from
     ! the specific humidity.
@@ -464,7 +464,7 @@ contains
     call setupatm(carma_ptr, cstate, .false., rplanet, rc)
     if (rc < 0) return
 
-    cstate%f_ekz(:)  = ekz(:) / (cstate%f_zmetl(:))**2._f  			!PETER !DPOW
+    cstate%f_ekz(:)  = ekz(:) / (cstate%f_zmetl(:))**2  			!PETER !DPOW
     
 
     ! If the model uses a gas, then set the relative and
@@ -1378,7 +1378,7 @@ contains
       if (cstate%f_carma%f_do_vtran) then
         if (present(vf))            vf(:)              = cstate%f_vf(:, ibin, igroup) / cstate%f_zmetl(:)
         if (present(winds))         winds(:)           = cstate%f_winds(:)                     !PETER
-        if (present(ekz))           ekz(:)             = cstate%f_ekz(:)  / cstate%f_zmetl(:)**2._f                   !PETER !DPOW CHECK
+        if (present(ekz))           ekz(:)             = cstate%f_ekz(:)  / cstate%f_zmetl(:)**2                   !PETER !DPOW CHECK
       else
         if (present(vf))            vf(:)              = CAM_FILL
         if (present(winds))         winds(:)           = CAM_FILL                     !PETER
@@ -1631,7 +1631,7 @@ contains
     if (present(wtpct))  wtpct(:)  = cstate%f_wtpct(:)
     if (present(gflux))  gflux(:)  = cstate%f_gflux(:, igas)                            !PETER
     if (present(winds))  winds(:)  = cstate%f_winds(:)                            !PETER
-    if (present(ekz))    ekz(:)    = cstate%f_ekz(:) / cstate%f_zmetl(:)**2._f                               !PETER !DPOW
+    if (present(ekz))    ekz(:)    = cstate%f_ekz(:) / cstate%f_zmetl(:)**2                               !PETER !DPOW
     
     return
   end subroutine CARMASTATE_GetGas

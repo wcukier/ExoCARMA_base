@@ -34,6 +34,7 @@ subroutine coagl(carma, cstate, rc)
   integer :: iz
   integer :: i
   integer :: j
+  real(kind=f) :: volx_val  ! hoisted volx(igrp,ig,jg,i,j) — iz-invariant
 
 
   ! Loop over particle groups for which coagulation loss is being
@@ -54,46 +55,43 @@ subroutine coagl(carma, cstate, rc)
       ! Resulting particle is in same group as particle under consideration --
       ! partial loss (muliplies <volx>).
       if( igrp .eq. ig )then
-  
-        ! Loop over the column
-        do iz = 1, NZ
-  
-          if( pconmax(iz,jg) .gt. FEW_PC .and. &
-              pconmax(iz,ig) .gt. FEW_PC )then
-  
-            do i = 1, NBIN-1
-              do j = 1, NBIN
-  
-              coaglg(iz,i,ig) = coaglg(iz,i,ig) & 
-                        + ckernel(iz,i,j,ig,jg) * &
-                        pcl(iz,j,je) * volx(igrp,ig,jg,i,j) 
-              enddo
+
+        ! Reordered (i, j, iz) so the inner iz loop is contiguous on
+        ! ckernel(:,i,j,...), pcl(:,j,je), coaglg(:,i,ig) and the iz-invariant
+        ! volx lookup is done once per (i,j) instead of NZ times. The
+        ! per-iz pconmax guard is preserved. Floating-point summation order
+        ! over j for each (iz,i) is unchanged, so output is bit-identical.
+        do i = 1, NBIN-1
+          do j = 1, NBIN
+            volx_val = volx(igrp,ig,jg,i,j)
+            do iz = 1, NZ
+              if( pconmax(iz,jg) .gt. FEW_PC .and. &
+                  pconmax(iz,ig) .gt. FEW_PC )then
+                coaglg(iz,i,ig) = coaglg(iz,i,ig) &
+                          + ckernel(iz,i,j,ig,jg) * &
+                          pcl(iz,j,je) * volx_val
+              endif
             enddo
-          endif
-        enddo  ! iz
+          enddo
+        enddo
   
       !  Resulting particle is in a different group -- complete loss (no <volx>).
       else if( igrp .ne. ig .and. igrp .ne. 0 )then
-  
-        !  Loop over the column
-        do iz = 1, NZ
 
-          !  Bypass calculation if few particles present
-
-          if( pconmax(iz,jg) .gt. FEW_PC .and. &
-              pconmax(iz,ig) .gt. FEW_PC )then
-
-            do i = 1, NBIN
-              do j = 1, NBIN
-
+        ! Reordered (i, j, iz) for the same reason as the partial-loss branch
+        ! above. No volx here (different group → complete loss).
+        do i = 1, NBIN
+          do j = 1, NBIN
+            do iz = 1, NZ
+              if( pconmax(iz,jg) .gt. FEW_PC .and. &
+                  pconmax(iz,ig) .gt. FEW_PC )then
                 coaglg(iz,i,ig) = coaglg(iz,i,ig) &
                       + ckernel(iz,i,j,ig,jg) * &
                       pcl(iz,j,je)
-
-              enddo
+              endif
             enddo
-          endif  ! pconmax(ig) * pconmax(jg) > FEW_PC ** 2
-        enddo  ! iz
+          enddo
+        enddo
       endif  ! igrp .eq. ig ?
     enddo  ! jg
   enddo  ! ig
