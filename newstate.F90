@@ -279,10 +279,10 @@ subroutine newstate(carma, cstate, rc)
             exit
           end if
           if (rc_lcl .eq. RC_WARNING) then
-            if (warned .eq. 0) then
-              write(*,*) "WARNING: In microfast"
-              warned = 1
-            endif
+            ! if (warned .eq. 0) then
+            !   write(*,*) "WARNING: In microfast"
+            !   warned = 1
+            ! endif
             rc_lcl = RC_OK
           end if
           ! write(*,*) "after microfast", nretries_local
