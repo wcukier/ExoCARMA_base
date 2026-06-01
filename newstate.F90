@@ -164,7 +164,7 @@ subroutine newstate(carma, cstate, rc)
     !$OMP& PRIVATE(iz, ntsubsteps, takeSteps, fraction, maxrate, warned, &
     !$OMP&         isubstep, igas, ibin, ielem, igroup, sedlayer, pcd_last, &
     !$OMP&         rc_lcl, iz_ok, nretries_local, dtime_lcl) &
-    !$OMP& SCHEDULE(dynamic)
+    !$OMP& SCHEDULE(guided)
     do iz = kb,ke,idk
       rc_lcl = RC_OK
       iz_ok  = .true.
