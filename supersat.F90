@@ -41,11 +41,26 @@ subroutine supersat(carma, cstate, iz, igas, rc)
   
 
   ! Add in reaction saturation ratio correction for type III reactions (Helling
-  ! and Woitke 2006)
+  ! and Woitke 2006). The reaction supersaturation ratio is S_r = S**(1/nu_key)
+  ! (Eq. B.8), where nu_key = f_stofact is the stoichiometric factor of the key
+  ! educt. This routine returns S_r - 1; the below (else) branch returns S - 1.
   if ( carma%f_gas(igas)%f_is_type3 .eq. 1 ) then ! WC
-    ! note this calculates S_r = sqrt(S) - 1, the below calculation is for S-1
-    supsatl(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapl(iz,igas)) - 1._f 
-    supsati(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapi(iz,igas)) - 1._f
+    if ( carma%f_gas(igas)%f_stofact .eq. 2 ) then
+      ! nu_key = 2 (e.g. Mg2SiO4, Al2O3): S_r = sqrt(S) - kept as sqrt to avoid
+      ! a libm pow() call in this growth-path kernel.
+      supsatl(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapl(iz,igas)) - 1._f
+      supsati(iz,igas) = sqrt(gc_cgs * rvap * t(iz) / pvapi(iz,igas)) - 1._f
+    else if ( carma%f_gas(igas)%f_stofact .eq. 1 ) then
+      ! nu_key = 1: S_r = S, identical to the type I form.
+      supsatl(iz,igas) = (gc_cgs * rvap * t(iz) - pvapl(iz,igas)) / pvapl(iz,igas)
+      supsati(iz,igas) = (gc_cgs * rvap * t(iz) - pvapi(iz,igas)) / pvapi(iz,igas)
+    else
+      ! General nu_key: S_r = S**(1/nu_key). Runtime exponent => libm pow().
+      supsatl(iz,igas) = (gc_cgs * rvap * t(iz) / pvapl(iz,igas)) &
+        ** (1._f / real(carma%f_gas(igas)%f_stofact, f)) - 1._f
+      supsati(iz,igas) = (gc_cgs * rvap * t(iz) / pvapi(iz,igas)) &
+        ** (1._f / real(carma%f_gas(igas)%f_stofact, f)) - 1._f
+    endif
   else
     supsatl(iz,igas) = (gc_cgs * rvap * t(iz) - pvapl(iz,igas)) / pvapl(iz,igas)
     supsati(iz,igas) = (gc_cgs * rvap * t(iz) - pvapi(iz,igas)) / pvapi(iz,igas)
