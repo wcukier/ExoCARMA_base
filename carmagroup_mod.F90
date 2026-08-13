@@ -38,7 +38,8 @@ contains
 
   subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, ishape, eshape, is_ice, &
       rc, irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
-      cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold)
+      cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold, &
+      qext, ssa, asym)
     type(carma_type), intent(inout)             :: carma               !! the carma object
     integer, intent(in)                         :: igroup              !! the group index
     character(*), intent(in)                    :: name                !! the group name, maximum of 255 characters
@@ -68,6 +69,9 @@ contains
     integer, optional, intent(in)               :: imiertn             !! mie routine [I_MIERTN_TOON1981 | I_MIERTN_BOHREN1983]
     logical, optional, intent(in)               :: is_sulfate          !! is this a sulfate particle?
     real(kind=f), optional, intent(in)          :: dpc_threshold       !! convergence criteria for particle concentration [fraction]
+    real(kind=f), optional, intent(in)          :: qext(carma%f_NWAVE,carma%f_NBIN) !! extinction efficiency, per wavelength and bin
+    real(kind=f), optional, intent(in)          :: ssa(carma%f_NWAVE,carma%f_NBIN)  !! single scattering albedo, per wavelength and bin
+    real(kind=f), optional, intent(in)          :: asym(carma%f_NWAVE,carma%f_NBIN) !! asymmetry factor, per wavelength and bin
 
     ! Local variables
     integer                               :: ier
@@ -140,6 +144,14 @@ contains
       carma%f_group(igroup)%f_qext(:,:) = 0._f
       carma%f_group(igroup)%f_ssa(:,:)  = 0._f
       carma%f_group(igroup)%f_asym(:,:) = 0._f
+
+      ! Optical properties may be supplied directly rather than computed from
+      ! refidx by the mie code. The radiatively coupled CARMApy path does this:
+      ! its tables are generated on exactly this bin grid and wavelength set, so
+      ! there is nothing left to interpolate or recompute at run time.
+      if (present(qext)) carma%f_group(igroup)%f_qext(:,:) = qext(:,:)
+      if (present(ssa))  carma%f_group(igroup)%f_ssa(:,:)  = ssa(:,:)
+      if (present(asym)) carma%f_group(igroup)%f_asym(:,:) = asym(:,:)
     end if
     
     if (ishape .eq. I_FRACTAL) then

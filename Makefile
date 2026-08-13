@@ -28,7 +28,8 @@ vaporp_s2_lyons2008.o vaporp_kcl_morley2012.o vaporp_zns_morley2012.o \
 vaporp_na2s_morley2012.o vaporp_mns_morley2012.o vaporp_cr_morley2012.o \
 vaporp_fe_visscher2010.o vaporp_mg2sio4_visscher2010.o vaporp_s8_zahnle2016.o \
 vaporp_tio2_lodders1999.o vaporp_tio2_helling2001.o vaporp_al2o3_wakeford2017.o \
-vaporp_co_wylie1958.o vaporp_user.o sulfate_utils.o sulfnuc.o sulfnucrate.o setupedif.o vertgas.o homnucgen.o 
+vaporp_co_wylie1958.o vaporp_user.o sulfate_utils.o sulfnuc.o sulfnucrate.o setupedif.o vertgas.o homnucgen.o \
+carma_planck.o carma_ckopacity.o carma_rtsolve.o carma_cloudopt.o carma_linalg.o carma_rce.o
 
 #freezglaerl_murray2010.o freezaerl_tabazadeh2000.o freezaerl_koop2000.o \
 #freezaerl_mohler2010.o freezdropl.o hetnucl.o melticel.o gasexchange.o \
@@ -59,6 +60,31 @@ vaporp_co_wylie1958.html vaporp_user.html sulfate_utils.html sulfnuc.html sulfnu
 #freezaerl_mohler2010.html freezdropl.html hetnucl.html melticel.html gasexchange.html \
 
 carma_precision_mod.o : carma_precision_mod.F90
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# Radiative transfer for the radiatively coupled path. These depend only on
+# the precision module -- they are deliberately kept free of carma_types_mod so
+# they can be compiled standalone and validated against pyHARP; see
+# tests/integration/test_radiation_port.py.
+carma_planck.o : carma_planck.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_ckopacity.o : carma_ckopacity.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_rtsolve.o : carma_rtsolve.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_cloudopt.o : carma_cloudopt.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_linalg.o : carma_linalg.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# carma_rce ties the four together, so it is the one that depends on them all.
+carma_rce.o : carma_rce.F90 carma_precision_mod.mod carma_enums_mod.mod \
+              carma_planck.mod carma_ckopacity.mod carma_cloudopt.mod \
+              carma_rtsolve.mod carma_linalg.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
 carma_enums_mod.o : carma_enums_mod.F90
