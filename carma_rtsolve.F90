@@ -30,6 +30,10 @@ module carma_rtsolve
 
   private
   public :: toon_lw_column
+  !! Shared with ``carma_swsolve``: both two-stream solvers close on the same
+  !! tridiagonal system and the reference has one implementation of it, so
+  !! duplicating it here would be two copies to keep in step for no gain.
+  public :: dtridgl
 
   real(kind=f), parameter :: PI_F  = 3.14159265358979323846_f
   real(kind=f), parameter :: TWOPI = 2._f * PI_F

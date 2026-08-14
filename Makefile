@@ -29,7 +29,8 @@ vaporp_na2s_morley2012.o vaporp_mns_morley2012.o vaporp_cr_morley2012.o \
 vaporp_fe_visscher2010.o vaporp_mg2sio4_visscher2010.o vaporp_s8_zahnle2016.o \
 vaporp_tio2_lodders1999.o vaporp_tio2_helling2001.o vaporp_al2o3_wakeford2017.o \
 vaporp_co_wylie1958.o vaporp_user.o sulfate_utils.o sulfnuc.o sulfnucrate.o setupedif.o vertgas.o homnucgen.o \
-carma_planck.o carma_ckopacity.o carma_rtsolve.o carma_cloudopt.o carma_linalg.o carma_rce.o
+carma_planck.o carma_ckopacity.o carma_rtsolve.o carma_cloudopt.o carma_linalg.o \
+carma_rayleigh.o carma_swsolve.o carma_rce.o
 
 #freezglaerl_murray2010.o freezaerl_tabazadeh2000.o freezaerl_koop2000.o \
 #freezaerl_mohler2010.o freezdropl.o hetnucl.o melticel.o gasexchange.o \
@@ -81,10 +82,19 @@ carma_cloudopt.o : carma_cloudopt.F90 carma_precision_mod.mod
 carma_linalg.o : carma_linalg.F90 carma_precision_mod.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
-# carma_rce ties the four together, so it is the one that depends on them all.
+carma_rayleigh.o : carma_rayleigh.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# The shortwave solver shares dtridgl with the longwave one, so it needs
+# carma_rtsolve's module file and not just the precision kind.
+carma_swsolve.o : carma_swsolve.F90 carma_precision_mod.mod carma_rtsolve.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# carma_rce ties the rest together, so it is the one that depends on them all.
 carma_rce.o : carma_rce.F90 carma_precision_mod.mod carma_enums_mod.mod \
               carma_planck.mod carma_ckopacity.mod carma_cloudopt.mod \
-              carma_rtsolve.mod carma_linalg.mod
+              carma_rtsolve.mod carma_linalg.mod carma_rayleigh.mod \
+              carma_swsolve.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
 carma_enums_mod.o : carma_enums_mod.F90

@@ -16,10 +16,11 @@
 !! a cloud deck can drive a detached convective layer aloft over a stable
 !! region. ``is_conv`` carries the per-layer answer.
 !!
-!! There is no incident radiation: for an isolated object ``Teff == T_int`` and
-!! there is no shortwave bookkeeping. The internal flux is imposed as the net
-!! flux through the base of the column, so radiative-convective equilibrium is
-!! the state in which ``F_TOA == sigma*Teff**4``.
+!! There is no incident radiation: the internal flux is imposed as the net flux
+!! through the base of the column, so radiative-convective equilibrium is the
+!! state in which ``F_TOA == sigma*t_int**4``. For an isolated object that is
+!! also the effective temperature, but the two are distinct quantities and only
+!! the internal one is an input here.
 !!
 !! **Cadence.** A full solve costs roughly as much as the microphysics it sits
 !! next to, and the cloud field barely moves in one timestep, so the solve runs
@@ -46,10 +47,13 @@ module carma_rce
   use carma_precision_mod
   use carma_enums_mod, only : I_CART
   use carma_planck,    only : bbflux_wavenumber
-  use carma_ckopacity, only : ck_table_type, ck_load, ck_destroy, ck_kappa_column
+  use carma_ckopacity, only : ck_table_type, ck_load, ck_destroy, ck_kappa_column, &
+                              CK_AVOGADRO
   use carma_cloudopt,  only : cloud_optics_column
   use carma_rtsolve,   only : toon_lw_column
+  use carma_swsolve,   only : toon_sw_column
   use carma_linalg,    only : lu_factor, lu_solve
+  use carma_rayleigh,  only : RAY_NSPEC, RAY_SOLAR_H2HE, ray_sigma_mix
 
   implicit none
 
@@ -119,6 +123,12 @@ module carma_rce
   !! Every sweep conserves enthalpy exactly, so a partial adjustment is a
   !! smaller correction, never a wrong one. ``resid`` reports what is left.
   integer, parameter      :: CONV_ITERMAX = 30
+
+  !! Fewest layers a convective zone may span. Flags are set pairwise, so two
+  !! is the shortest run the identification can produce, and a lone pair is the
+  !! signature of a grid-scale oscillation rather than of convection. Three
+  !! demands two adjacent neutral interfaces, which a 2*dz mode cannot fake.
+  integer, parameter      :: CONV_MIN_LAYERS = 3
 
   !! Floor on the adiabatic gradient used by the adjustment. The Parmentier
   !! fit crosses zero at PARM_A/PARM_B = 9600 K and is negative above it,
@@ -190,10 +200,42 @@ module carma_rce
     integer      :: igridv  = 0     !! vertical grid type
     integer      :: mode    = I_RCE_EQUILIBRIUM
 
-    real(kind=f) :: teff    = 0._f  !! effective temperature [K]
+    real(kind=f) :: t_int   = 0._f  !! internal temperature [K]
     real(kind=f) :: cp      = 0._f  !! specific heat [J/kg/K]
     real(kind=f) :: grav    = 0._f  !! gravity [m/s^2]
     real(kind=f) :: wtmol   = 0._f  !! mean molecular weight [g/mol]
+
+    ! ---- incident shortwave -----------------------------------------------
+    !! Irradiation temperature [K]: the incident flux normal to the beam is
+    !! ``sigma * t_irr**4``. Zero means an isolated object and switches the
+    !! whole shortwave path off.
+    real(kind=f) :: t_irr   = 0._f
+    !! Temperature of the blackbody the incident spectrum is *shaped* like.
+    !! It carries no energy scale -- that is t_irr's job -- so the two are
+    !! independent and a hot star at weak irradiation is expressible.
+    real(kind=f) :: t_star  = 0._f
+    !! Cosine of the incidence angle. Also where redistribution lives: 0.5 is
+    !! a dayside average, 0.25 full redistribution.
+    real(kind=f) :: mu0     = 0.5_f
+    !! Surface albedo. Zero for a gas giant, which has no surface.
+    real(kind=f) :: w_surf  = 0._f
+    !! True when t_irr > 0, i.e. when there is anything to solve.
+    logical      :: sw_on   = .false.
+
+    !! Per-band incident flux [W/m^2], summing to sigma*t_irr**4.
+    real(kind=f), allocatable :: f0(:)
+    !! Per-band Rayleigh attenuation factor: multiply by concentration
+    !! [mol/m^3] and path [m] to get an optical depth.
+    real(kind=f), allocatable :: ray_fac(:)
+    !! Per-level incidence cosine, carried as an array so a sphericity
+    !! correction can be added without changing the solver's interface.
+    real(kind=f), allocatable :: mu_lev(:)
+    !! Shortwave flux workspace.
+    real(kind=f), allocatable :: sw_up(:), sw_dn(:)
+
+    !! Diagnostics, refreshed on every solve.
+    real(kind=f) :: absorbed_sw = 0._f  !! shortwave absorbed by the column [W/m^2]
+    real(kind=f) :: reflected_sw = 0._f !! shortwave reflected to space [W/m^2]
 
     !! Which adiabat the convective interior follows.
     integer      :: adiabat = I_ADIABAT_PARMENTIER
@@ -295,7 +337,8 @@ contains
   !! namelist uses (erg/g/K and cm/s^2) and converted here, so callers do not
   !! have to.
   subroutine rce_init(rce, nz, nbin, ngroup, nband, igridv, ck_path, &
-                      teff, cp_cgs, grav_cgs, wtmol, &
+                      t_int, t_irr, t_star, mu0, w_surf, &
+                      cp_cgs, grav_cgs, wtmol, &
                       adiabat, adiabat_path, &
                       mode, accel, dt_max, dt_tol, dtau_tol, gap_max, rc)
 
@@ -306,7 +349,11 @@ contains
     character(len=*), intent(in) :: ck_path
     integer, intent(in)      :: adiabat     !! I_ADIABAT_PARMENTIER or _TABLE
     character(len=*), intent(in) :: adiabat_path !! only read for _TABLE
-    real(kind=f), intent(in) :: teff        !! [K]
+    real(kind=f), intent(in) :: t_int       !! internal temperature [K]
+    real(kind=f), intent(in) :: t_irr       !! irradiation temperature [K], 0 = isolated
+    real(kind=f), intent(in) :: t_star      !! shape of the incident spectrum [K]
+    real(kind=f), intent(in) :: mu0         !! cos(incidence), carries redistribution
+    real(kind=f), intent(in) :: w_surf      !! surface albedo, 0 for a gas giant
     real(kind=f), intent(in) :: cp_cgs      !! [erg/g/K]
     real(kind=f), intent(in) :: grav_cgs    !! [cm/s^2]
     real(kind=f), intent(in) :: wtmol       !! [g/mol]
@@ -338,7 +385,16 @@ contains
     rce%ng     = rce%ck%ng
     rce%nwave  = rce%ck%nwave
 
-    rce%teff   = teff
+    rce%t_int  = t_int
+    rce%t_irr  = t_irr
+    rce%t_star = t_star
+    rce%mu0    = mu0
+    rce%w_surf = w_surf
+
+    ! A shaped spectrum needs a temperature to be shaped by. Falling back on
+    ! the irradiation temperature reproduces the common case where the beam is
+    ! a blackbody carrying exactly its own flux.
+    if (rce%t_star <= 0._f) rce%t_star = t_irr
     rce%cp     = cp_cgs   * CP_CGS2SI
     rce%grav   = grav_cgs * ACC_CGS2SI
     rce%wtmol  = wtmol
@@ -371,13 +427,85 @@ contains
     allocate(rce%tnum_pert(nz), rce%tden_pert(nz))
     allocate(rce%is_conv(nz))
 
+    allocate(rce%f0(rce%nband), rce%ray_fac(rce%nband))
+    allocate(rce%mu_lev(nz+1), rce%sw_up(nz+1), rce%sw_dn(nz+1))
+
     rce%dtdt(:)    = 0._f
     rce%fnet(:)    = 0._f
     rce%tau_rad(:) = huge(0._f)
     rce%is_conv(:) = .false.
 
+    call rce_init_shortwave(rce)
+
     return
   end subroutine rce_init
+
+
+  !! Build the incident spectrum and the Rayleigh cross-sections, once.
+  !!
+  !! Both depend only on the band grid and on ``t_star`` / ``t_irr``, none of
+  !! which move during a run, so this is startup work rather than per-solve
+  !! work.
+  subroutine rce_init_shortwave(rce)
+
+    implicit none
+
+    type(rce_type), intent(inout) :: rce
+
+    integer      :: iband
+    real(kind=f) :: total, lam_cm, wn_c, sig
+    real(kind=f) :: x(RAY_NSPEC)
+
+    rce%sw_on = (rce%t_irr > 0._f)
+
+    rce%f0(:)      = 0._f
+    rce%ray_fac(:) = 0._f
+    rce%mu_lev(:)  = rce%mu0
+
+    if (.not. rce%sw_on) return
+
+    ! ---- incident spectrum -------------------------------------------------
+    ! The shape is a blackbody at t_star; the magnitude is set by t_irr. They
+    ! are separated because a companion's spectrum and the amount of it that
+    ! arrives are independent facts, and folding them together would make a
+    ! weakly irradiated hot primary inexpressible.
+    do iband = 1, rce%nband
+      rce%f0(iband) = bbflux_wavenumber(rce%ck%wmin(iband), &
+                                        rce%ck%wmax(iband), rce%t_star)
+    end do
+
+    total = sum(rce%f0(:))
+
+    if (total > 0._f) then
+      rce%f0(:) = rce%f0(:) * (SIGMA_SB * rce%t_irr**4) / total
+    else
+      ! t_star so low that the band set captures no flux at all. Rather than
+      ! divide by zero, put the whole budget in the longest-wavelength band,
+      ! which is where it would have gone.
+      rce%f0(rce%nband) = SIGMA_SB * rce%t_irr**4
+    end if
+
+    ! ---- Rayleigh ----------------------------------------------------------
+    ! Evaluated at the band centre, matching how the cloud optics are
+    ! tabulated. For a lambda^-4 law across a wide band that slightly
+    ! underestimates the band mean; the bands are narrow enough that this is
+    ! well inside the error already accepted in the cross-section itself.
+    x(:) = RAY_SOLAR_H2HE(:)
+
+    do iband = 1, rce%nband
+      wn_c = 0.5_f * (rce%ck%wmin(iband) + rce%ck%wmax(iband))
+      if (wn_c <= 0._f) cycle
+
+      lam_cm = 1._f / wn_c
+      sig    = ray_sigma_mix(x, lam_cm)
+
+      ! Same conversion the gas opacity uses: cm^2/molecule -> 1/m, given a
+      ! concentration in mol/m^3 supplied later.
+      rce%ray_fac(iband) = 1.e-4_f * CK_AVOGADRO * sig
+    end do
+
+    return
+  end subroutine rce_init_shortwave
 
 
   !! Release the opacity table and all work arrays.
@@ -420,6 +548,11 @@ contains
     if (allocated(rce%ad_t))       deallocate(rce%ad_t)
     if (allocated(rce%ad_p))       deallocate(rce%ad_p)
     if (allocated(rce%ad_grad))    deallocate(rce%ad_grad)
+    if (allocated(rce%f0))         deallocate(rce%f0)
+    if (allocated(rce%ray_fac))    deallocate(rce%ray_fac)
+    if (allocated(rce%mu_lev))     deallocate(rce%mu_lev)
+    if (allocated(rce%sw_up))      deallocate(rce%sw_up)
+    if (allocated(rce%sw_dn))      deallocate(rce%sw_dn)
 
     return
   end subroutine rce_destroy
@@ -667,6 +800,7 @@ contains
 
     integer      :: nz, iz, iter
     logical      :: did_adj
+    logical      :: neutral(rce%nz)
     real(kind=f) :: dp(rce%nz), tbar, pfact
 
     nz = rce%nz
@@ -708,6 +842,7 @@ contains
     ! adiabat belong to a convective zone -- "above" because a pair the sweeps
     ! did not have the budget to finish is still a convecting one.
     is_conv(:) = .false.
+    neutral(:) = .false.
     resid      = 0._f
 
     do iz = 1, nz - 1
@@ -715,12 +850,37 @@ contains
       pfact = rce_pfact(rce, tbar, p(iz), p(iz+1))
 
       if (t(iz) >= pfact * t(iz+1) * (1._f - CONV_TOL)) then
+        neutral(iz)   = .true.
         is_conv(iz)   = .true.
         is_conv(iz+1) = .true.
       end if
 
       resid = max(resid, t(iz) / (pfact * t(iz+1)) - 1._f)
     end do
+
+    ! ---- discard zones too thin to be convection --------------------------
+    ! Flags are set an interface at a time, so the shortest run expressible is
+    ! two layers -- which is also exactly what a grid-scale (2*dz) oscillation
+    ! in t manufactures: one interface made momentarily neutral by an
+    ! anomalously warm layer, with both its neighbours left strongly
+    ! subadiabatic. Measured on a real column: an isolated pair at 0.005 bar
+    ! sat at S = -4e-6 between interfaces at S = -6e-2, while genuine zones ran
+    ! 13 and 14 layers deep.
+    !
+    ! Keeping such a pair is not harmless bookkeeping. A layer marked
+    ! convective is taken out of the implicit temperature solve and given the
+    ! per-layer diagonal update instead, so the flag switches off the one
+    ! mechanism able to damp a coupled mode at the very layers carrying it, and
+    ! the oscillation that produced the flag is then sustained by it.
+    !
+    ! What joins two layers into one zone is therefore the *interface* between
+    ! them, not the fact that both carry a flag. A sawtooth flags every layer
+    ! it spans -- each one sits on a neutral interface with one neighbour --
+    ! but the interfaces alternate neutral and strongly stable, so by
+    ! interfaces it is a chain of two-layer islands and the purge below sees
+    ! it for what it is. Reading contiguity off the layer flags instead welds
+    ! those islands into a single deep zone that clears any length test.
+    call rce_purge_thin_zones(nz, neutral, is_conv)
 
     nzone = 0
     do iz = 1, nz
@@ -729,6 +889,8 @@ contains
         nzone = nzone + 1
       else if (.not. is_conv(iz-1)) then
         nzone = nzone + 1
+      else if (.not. neutral(iz-1)) then
+        nzone = nzone + 1
       end if
     end do
 
@@ -736,10 +898,62 @@ contains
     do iz = 1, nz
       if (.not. is_conv(iz)) exit
       nz_rcb = iz
+      if (iz < nz) then
+        if (.not. neutral(iz)) exit
+      end if
     end do
 
     return
   end subroutine rce_conv_adj
+
+
+  !! Clear the convective flag from any run shorter than CONV_MIN_LAYERS.
+  !!
+  !! A run extends from one layer to the next only across a neutral interface,
+  !! ``neutral(iz)`` describing the interface between layers ``iz`` and
+  !! ``iz+1``. Two flagged layers with a stably stratified interface between
+  !! them belong to different zones, however adjacent they are: convection
+  !! does not cross a stable interface, and a run that appears to is a
+  !! grid-scale oscillation wearing the flags of the neutral interfaces it
+  !! manufactured.
+  !!
+  !! Only the flags move. The temperatures are left exactly as the adjustment
+  !! sweeps left them, which is the right division of labour: a pair the sweeps
+  !! did not touch was never superadiabatic enough to mix, and unflagging it
+  !! only returns it to the radiative solve that should have been handling it.
+  pure subroutine rce_purge_thin_zones(nz, neutral, is_conv)
+
+    implicit none
+
+    integer, intent(in)    :: nz
+    logical, intent(in)    :: neutral(nz)
+    logical, intent(inout) :: is_conv(nz)
+
+    integer :: iz, ibeg
+
+    iz = 1
+    do while (iz <= nz)
+
+      if (.not. is_conv(iz)) then
+        iz = iz + 1
+        cycle
+      end if
+
+      ibeg = iz
+      do while (iz < nz)
+        if (.not. is_conv(iz+1)) exit
+        if (.not. neutral(iz)) exit
+        iz = iz + 1
+      end do
+
+      if (iz - ibeg + 1 < CONV_MIN_LAYERS) is_conv(ibeg:iz) = .false.
+
+      iz = iz + 1
+
+    end do
+
+    return
+  end subroutine rce_purge_thin_zones
 
 
   !! Reconstruct level temperatures from layer-centre values.
@@ -881,13 +1095,13 @@ contains
                     rce%fnet, rce%tau_num, rce%tau_den)
 
     ! The internal flux is a boundary condition, not something to be inferred:
-    ! the net flux through the base of the column is sigma*Teff^4 by
+    ! the net flux through the base of the column is sigma*t_int^4 by
     ! definition. toon_lw_column's gas-giant lower boundary extrapolates it
     ! from the deep Planck gradient instead, which is only right once the deep
-    ! profile already is. Imposing it makes F_TOA == sigma*Teff^4 the fixed
+    ! profile already is. Imposing it makes F_TOA == sigma*t_int^4 the fixed
     ! point of the column's energy budget, which is what the convective
     ! adjustment then transports the flux to satisfy.
-    rce%fnet(1) = SIGMA_SB * rce%teff ** 4
+    rce%fnet(1) = SIGMA_SB * rce%t_int ** 4
 
     ! ---- flux divergence -> heating rate ----------------------------------
     do iz = 1, nz
@@ -956,6 +1170,8 @@ contains
     integer      :: nz, nlev, iz, iband, ig, iw
     real(kind=f) :: conc(rce%nz), dz_cm(rce%nz), tl(rce%nz+1)
     real(kind=f) :: btop_factor, tau_gas, tau_tot, wt, be_mid
+    real(kind=f) :: tau_ray, tau_cld, tau_sca
+    real(kind=f) :: sw_top, sw_bot, sw_ref
 
     call rce_level_temps(rce%nz, p, pl, t, tl)
 
@@ -995,25 +1211,57 @@ contains
     tau_num(:)  = 0._f
     tau_den(:)  = 0._f
 
+    sw_top = 0._f
+    sw_bot = 0._f
+    sw_ref = 0._f
+
     do iband = 1, rce%nband
       do ig = 1, rce%ng
         iw = (iband - 1) * rce%ng + ig
 
         do iz = 1, nz
           tau_gas = rce%beta(iw, iz) * rce%dz(iz)
-          tau_tot = tau_gas + rce%tau_c(iband, iz)
+
+          ! Rayleigh scattering by the gas. Only assembled when there is a
+          ! beam to scatter: it falls as lambda^-4, so in the thermal infrared
+          ! it is five orders of magnitude below the optical and contributes
+          ! nothing, while leaving it out of an unirradiated run keeps such a
+          ! run bit-for-bit what it was before the shortwave existed.
+          if (rce%sw_on) then
+            tau_ray = rce%ray_fac(iband) * conc(iz) * rce%dz(iz)
+          else
+            tau_ray = 0._f
+          end if
+
+          tau_cld = rce%tau_c(iband, iz)
+          tau_tot = tau_gas + tau_cld + tau_ray
 
           rce%dtau(iz) = tau_tot
+
+          ! Scattering optical depth: the cloud's scattering part plus all of
+          ! the Rayleigh, which is conservative.
+          tau_sca = tau_cld * rce%w0_c(iband, iz) + tau_ray
+
           if (tau_tot > 0._f) then
-            ! Gas opacity is pure absorption, so all scattering is the cloud's.
-            rce%w0(iz) = rce%tau_c(iband, iz) * rce%w0_c(iband, iz) / tau_tot
+            ! Gas absorption does not scatter, so the scatterers are the cloud
+            ! and the Rayleigh term.
+            rce%w0(iz) = tau_sca / tau_tot
           else
             rce%w0(iz) = 0._f
           end if
           ! The two-stream coefficients are singular at w0 == 1 exactly, which
           ! a non-absorbing grain in a transparent band can reach.
-          rce%w0(iz)    = min(rce%w0(iz), 1._f - 1.e-12_f)
-          rce%gasym(iz) = rce%g_c(iband, iz)
+          rce%w0(iz) = min(rce%w0(iz), 1._f - 1.e-12_f)
+
+          ! Asymmetry is a scattering-weighted mean. Rayleigh is isotropic and
+          ! so enters with g = 0, dragging the column's asymmetry down wherever
+          ! it competes with the forward-peaked cloud.
+          if (tau_sca > 0._f) then
+            rce%gasym(iz) = tau_cld * rce%w0_c(iband, iz) &
+                            * rce%g_c(iband, iz) / tau_sca
+          else
+            rce%gasym(iz) = 0._f
+          end if
 
           ! Planck-weighted mean optical depth, accumulated here so the
           ! stabilisation timescale below costs nothing extra.
@@ -1031,8 +1279,37 @@ contains
         do iz = 1, nlev
           fnet(iz) = fnet(iz) + wt * (rce%f_up(iz) - rce%f_dn(iz))
         end do
+
+        ! ---- the incident beam, into the same net flux --------------------
+        ! Accumulating shortwave into `fnet` rather than tracking it apart is
+        ! what keeps the rest of this module unchanged. In equilibrium the
+        ! longwave carries sigma*t_int^4 + absorbed upward at the top while the
+        ! shortwave net there is -absorbed, so the two cancel and
+        ! `fnet(top) == sigma*t_int^4` remains the condition to converge on,
+        ! exactly as for an isolated object. The heating rate picks up
+        ! shortwave absorption for free, being a divergence of this same array.
+        if (rce%sw_on) then
+          if (rce%f0(iband) > 0._f) then
+            call toon_sw_column(nz, rce%f0(iband), rce%mu_lev, &
+                                rce%dtau, rce%w0, rce%gasym, rce%w_surf, &
+                                rce%sw_up, rce%sw_dn)
+
+            do iz = 1, nlev
+              fnet(iz) = fnet(iz) + wt * (rce%sw_up(iz) - rce%sw_dn(iz))
+            end do
+
+            sw_top = sw_top + wt * (rce%sw_dn(nlev) - rce%sw_up(nlev))
+            sw_bot = sw_bot + wt * (rce%sw_dn(1) - rce%sw_up(1))
+            sw_ref = sw_ref + wt * rce%sw_up(nlev)
+          end if
+        end if
       end do
     end do
+
+    ! What the column kept, and what it sent back. Both are diagnostics: the
+    ! energy is already in `fnet`.
+    rce%absorbed_sw  = sw_top - sw_bot
+    rce%reflected_sw = sw_ref
 
     return
   end subroutine rce_fluxes
