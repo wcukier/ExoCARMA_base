@@ -1176,6 +1176,9 @@ contains
 
     integer      :: nz, nlev, iz, iband, ig, iw
     real(kind=f) :: conc(rce%nz), dz_cm(rce%nz), tl(rce%nz+1)
+    !! (nband, nz) the part of each layer's emission its bounding levels
+    !! cannot see: the layer-centre Planck less the level mean.
+    real(kind=f) :: be_corr(rce%nband, rce%nz)
     real(kind=f) :: btop_factor, tau_gas, tau_tot, wt, be_lay
     real(kind=f) :: tau_ray, tau_cld, tau_sca
     real(kind=f) :: sw_top, sw_bot, sw_ref
@@ -1213,6 +1216,11 @@ contains
 
       call bbflux_wavenumber_col(rce%ck%wmin(iband), rce%ck%wmax(iband), &
                                  t(1:nz), rce%be_mid(iband, 1:nz))
+
+      do iz = 1, nz
+        be_corr(iband, iz) = rce%be_mid(iband, iz) &
+                             - 0.5_f * (rce%be(iband, iz) + rce%be(iband, iz+1))
+      end do
     end do
 
     ! No incident radiation: the top boundary is the auto-emission branch with
@@ -1287,7 +1295,7 @@ contains
         call toon_lw_column(nz, rce%dtau, rce%w0, rce%gasym, &
                             rce%be(iband, :), 0._f, -1, btop_factor, &
                             .false., .false., rce%f_up, rce%f_dn, &
-                            be_mid_in=rce%be_mid(iband, :))
+                            be_corr_in=be_corr(iband, :))
 
         wt = rce%ck%weights(iw)
         do iz = 1, nlev
