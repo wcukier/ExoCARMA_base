@@ -46,7 +46,7 @@ module carma_rce
 
   use carma_precision_mod
   use carma_enums_mod, only : I_CART
-  use carma_planck,    only : bbflux_wavenumber
+  use carma_planck,    only : bbflux_wavenumber, bbflux_wavenumber_col
   use carma_ckopacity, only : ck_table_type, ck_load, ck_destroy, ck_kappa_column, &
                               CK_AVOGADRO
   use carma_cloudopt,  only : cloud_optics_column
@@ -293,6 +293,11 @@ module carma_rce
     real(kind=f), allocatable :: w0_c(:,:)      !! (nband, nz)
     real(kind=f), allocatable :: g_c(:,:)       !! (nband, nz)
     real(kind=f), allocatable :: be(:,:)        !! (nband, nz+1) band Planck [W/m^2/sr]
+    !! (nband, nz) band Planck at the layer centres [W/m^2/sr]. The levels
+    !! above are interpolated from these, and an interpolation cannot see a
+    !! layer-to-layer oscillation, so the solver is given both: the centres
+    !! set how brightly each layer emits, the levels how that varies across it.
+    real(kind=f), allocatable :: be_mid(:,:)
     real(kind=f), allocatable :: numden_grp(:,:,:) !! (nz, nbin, ngroup) [#/cm^3]
     real(kind=f), allocatable :: dtau(:), w0(:), gasym(:)
     real(kind=f), allocatable :: f_up(:), f_dn(:)
@@ -417,6 +422,7 @@ contains
     allocate(rce%tau_c(rce%nband, nz), rce%w0_c(rce%nband, nz), &
              rce%g_c(rce%nband, nz))
     allocate(rce%be(rce%nband, nz+1))
+    allocate(rce%be_mid(rce%nband, nz))
     allocate(rce%numden_grp(nz, nbin, ngroup))
     allocate(rce%dtau(nz), rce%w0(nz), rce%gasym(nz))
     allocate(rce%f_up(nz+1), rce%f_dn(nz+1))
@@ -525,6 +531,7 @@ contains
     if (allocated(rce%w0_c))       deallocate(rce%w0_c)
     if (allocated(rce%g_c))        deallocate(rce%g_c)
     if (allocated(rce%be))         deallocate(rce%be)
+    if (allocated(rce%be_mid))     deallocate(rce%be_mid)
     if (allocated(rce%numden_grp)) deallocate(rce%numden_grp)
     if (allocated(rce%dtau))       deallocate(rce%dtau)
     if (allocated(rce%w0))         deallocate(rce%w0)
@@ -1169,7 +1176,7 @@ contains
 
     integer      :: nz, nlev, iz, iband, ig, iw
     real(kind=f) :: conc(rce%nz), dz_cm(rce%nz), tl(rce%nz+1)
-    real(kind=f) :: btop_factor, tau_gas, tau_tot, wt, be_mid
+    real(kind=f) :: btop_factor, tau_gas, tau_tot, wt, be_lay
     real(kind=f) :: tau_ray, tau_cld, tau_sca
     real(kind=f) :: sw_top, sw_bot, sw_ref
 
@@ -1194,12 +1201,18 @@ contains
                              qext, ssa, asym, &
                              rce%tau_c, rce%w0_c, rce%g_c)
 
-    ! ---- band-integrated Planck at every level ----------------------------
+    ! ---- band-integrated Planck at every level, and every layer -----------
+    ! The layer values are what each layer emits from; the level values give
+    ! the solver the gradient across it. Both are needed because `tl` is an
+    ! interpolation of `t` and so is blind to a layer-to-layer oscillation.
     do iband = 1, rce%nband
       do iz = 1, nlev
         rce%be(iband, iz) = bbflux_wavenumber(rce%ck%wmin(iband), &
                                               rce%ck%wmax(iband), tl(iz))
       end do
+
+      call bbflux_wavenumber_col(rce%ck%wmin(iband), rce%ck%wmax(iband), &
+                                 t(1:nz), rce%be_mid(iband, 1:nz))
     end do
 
     ! No incident radiation: the top boundary is the auto-emission branch with
@@ -1265,15 +1278,16 @@ contains
 
           ! Planck-weighted mean optical depth, accumulated here so the
           ! stabilisation timescale below costs nothing extra.
-          be_mid = 0.5_f * (rce%be(iband, iz) + rce%be(iband, iz+1))
+          be_lay = rce%be_mid(iband, iz)
           wt = rce%ck%weights(iw)
-          tau_num(iz) = tau_num(iz) + wt * be_mid * tau_tot
-          tau_den(iz) = tau_den(iz) + wt * be_mid
+          tau_num(iz) = tau_num(iz) + wt * be_lay * tau_tot
+          tau_den(iz) = tau_den(iz) + wt * be_lay
         end do
 
         call toon_lw_column(nz, rce%dtau, rce%w0, rce%gasym, &
                             rce%be(iband, :), 0._f, -1, btop_factor, &
-                            .false., .false., rce%f_up, rce%f_dn)
+                            .false., .false., rce%f_up, rce%f_dn, &
+                            be_mid_in=rce%be_mid(iband, :))
 
         wt = rce%ck%weights(iw)
         do iz = 1, nlev

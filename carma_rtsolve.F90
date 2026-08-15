@@ -106,7 +106,7 @@ contains
   subroutine toon_lw_column(nlay, dtau_in, w0_in, g_in, be_in, a_surf, &
                             top_emission_flag, btop_factor, hard_surface, &
                             delta_eddington_lw, f_up, f_dn, &
-                            f_up_mid, f_dn_mid)
+                            f_up_mid, f_dn_mid, be_corr_in)
 
     implicit none
 
@@ -126,10 +126,27 @@ contains
     real(kind=f), intent(out), optional :: f_up_mid(nlay)  !! layer-midpoint upward flux
     real(kind=f), intent(out), optional :: f_dn_mid(nlay)  !! layer-midpoint downward flux
 
+    !! The part of each layer's emission its own bounding levels cannot see
+    !! [W/m^2/sr]: the Planck intensity at the layer's temperature less the
+    !! Planck intensity the level interpolation implies there.
+    !!
+    !! The levels are interpolated from the layer centres, so for any profile
+    !! linear in ln p they reproduce the centre exactly and this is zero -- the
+    !! source below is then the one built from levels alone, unchanged. It
+    !! departs from zero only where a layer's temperature differs from what its
+    !! neighbours imply, which an interpolation cannot represent: a
+    !! layer-to-layer oscillation lives entirely in the part an average throws
+    !! away. Without this term such a layer emits at its neighbours'
+    !! temperature rather than its own, so one colder than its surroundings
+    !! radiates as though it were warm and cools further -- a positive feedback
+    !! at the grid scale, which manufactures the oscillation it feeds on.
+    real(kind=f), intent(in), optional :: be_corr_in(nlay)
+
     integer :: nlev, l, k, n, m, i
 
     ! top-down working copies
-    real(kind=f) :: dtau(nlay), w0(nlay), hg(nlay), be(nlay+1)
+    real(kind=f) :: dtau(nlay), w0(nlay), hg(nlay), be(nlay+1), be_c(nlay)
+    logical      :: have_corr
     real(kind=f) :: alp(nlay), lam(nlay), gam(nlay), term(nlay)
     real(kind=f) :: B0(nlay), B1(nlay)
     real(kind=f) :: Cpm1(nlay), Cmm1(nlay), Cp(nlay), Cm(nlay)
@@ -175,6 +192,15 @@ contains
       be(k) = be_in(nlev - k + 1)
     end do
 
+    have_corr = present(be_corr_in)
+
+    be_c(:) = 0._f
+    if (have_corr) then
+      do k = 1, nlay
+        be_c(k) = be_corr_in(nlay - k + 1)
+      end do
+    end if
+
     ! ---- per-layer two-stream coefficients ----------------------------------
     do k = 1, nlay
       alp(k)  = sqrt((1._f - w0(k)) / (1._f - w0(k) * hg(k)))
@@ -184,12 +210,17 @@ contains
 
       ! An optically negligible layer has no meaningful Planck gradient; using
       ! the midpoint value avoids dividing by ~0.
+      !
+      ! The source is linear in tau across the layer, B(tau) = B0 + B1*tau: the
+      ! levels set the slope, and `be_c` adds back the part of the layer's own
+      ! emission they cannot represent. It is zero for a resolved profile, so
+      ! this is the level-only source wherever the column is smooth.
       if (dtau(k) <= 1.e-6_f) then
         B1(k) = 0._f
-        B0(k) = 0.5_f * (be(k+1) + be(k))
+        B0(k) = 0.5_f * (be(k+1) + be(k)) + be_c(k)
       else
         B1(k) = (be(k+1) - be(k)) / dtau(k)
-        B0(k) = be(k)
+        B0(k) = be(k) + be_c(k)
       end if
 
       Cpm1(k) = B0(k) + B1(k) * term(k)
