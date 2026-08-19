@@ -29,11 +29,19 @@
 !! triggered by accumulated temperature drift, by a change in the column's
 !! cloud cross-section, or by a hard ceiling on elapsed steps.
 !!
+!! **Eddy diffusion.** ``rce_kzz`` recomputes the mixing-length Kzz from the
+!! same solve, so the eddy diffusion the microphysics mixes with follows the
+!! convective heat flux and the lapse rate instead of staying at whatever the
+!! run started from. It is held in ``kzz`` and the driver copies it into
+!! ``ekz``, which the driver already carries across a restart. Nothing here
+!! needs to: the first solve of any run, restarted or not, rebuilds the profile
+!! from the column it finds.
+!!
 !! **Units.** This module is SI throughout -- Pa, m, K, W/m^2 -- matching the
-!! driver's ``p``/``zc``/``zl`` and the radiative transfer modules. The two
+!! driver's ``p``/``zc``/``zl`` and the radiative transfer modules. The
 !! exceptions are documented at their conversion sites: ``Cp`` arrives in
-!! erg/g/K and gravity in cm/s^2 from the namelist, and
-!! ``cloud_optics_column`` is cgs.
+!! erg/g/K and gravity in cm/s^2 from the namelist, and ``cloud_optics_column``
+!! and ``rce_kzz`` are cgs.
 !!
 !! **Level temperatures.** The driver carries layer-centre temperatures, but
 !! the Planck source and the hydrostatic regrid both want level values. They
@@ -60,8 +68,9 @@ module carma_rce
   private
   public :: rce_type, rce_init, rce_update, rce_destroy
   public :: rce_adiabat, rce_level_temps, rce_regrid_z
-  public :: rce_grad_ad, rce_integrate_adiabat, rce_load_adiabat
-  public :: rce_conv_adj
+  public :: rce_grad_ad, rce_grad, rce_integrate_adiabat, rce_load_adiabat
+  public :: rce_conv_adj, rce_kzz
+  public :: I_KZZ_STATIC, I_KZZ_MIXING_LENGTH
   !! Exposed so the Jacobian's bandwidth can be measured from outside: the
   !! banded truncation below is only legitimate if a narrow band captures the
   !! operator, and that is a property of this discretisation, not of radiative
@@ -75,6 +84,11 @@ module carma_rce
   integer, parameter :: I_RCE_EQUILIBRIUM = 0
   !! Heating runs on the microphysical clock, so the time history is physical.
   integer, parameter :: I_RCE_PHYSICAL    = 1
+
+  !! The eddy diffusion profile supplied at startup is held for the whole run.
+  integer, parameter :: I_KZZ_STATIC        = 0
+  !! Kzz follows the evolving profile, from mixing length theory.
+  integer, parameter :: I_KZZ_MIXING_LENGTH = 1
 
   !! Stefan-Boltzmann constant [ W / m^2 / K^4 ]
   real(kind=f), parameter :: SIGMA_SB = 5.670374419e-8_f
@@ -136,6 +150,39 @@ module carma_rce
   !! below drive the pair apart instead of onto an adiabat. The tabulated
   !! gradient is positive everywhere, so this binds only on the fit.
   real(kind=f), parameter :: GRAD_AD_MIN = 1.e-3_f
+
+  !! ---- mixing length eddy diffusion -------------------------------------
+  !! The coefficients of the Kzz parameterisation, matching PICASO's
+  !! ``get_kzz`` term for term. See ``rce_kzz``.
+  !!
+  !! Scale factor on the mixing length velocity.
+  real(kind=f), parameter :: KZZ_SCALEF   = 1._f / 3._f
+  !! Floor on the mixing length as a fraction of the scale height, which is
+  !! what keeps Kzz finite in a stably stratified layer.
+  real(kind=f), parameter :: KZZ_MIXL_MIN = 0.1_f
+  !! How fast the convective flux is allowed to fall with height, as a
+  !! fraction of the pressure ratio across the pair of layers. Represents
+  !! convective overshoot; the value is arbitrary.
+  real(kind=f), parameter :: KZZ_CHF_FALL = 1._f / 3._f
+  !! Floor on the convective flux, as a fraction of the effective temperature
+  !! the column is radiating at. Enters as the fourth power, so this is a
+  !! floor of 6.25e-6 on the flux ratio.
+  real(kind=f), parameter :: KZZ_TEFF_MIN = 0.05_f
+  !! Specific heat used by the Kzz formula, as a multiple of the specific gas
+  !! constant. This is a diatomic ideal gas, and is deliberately *not*
+  !! ``rce%cp``: the parameterisation was calibrated with it, so substituting
+  !! the run's own Cp would change the answer without changing the physics it
+  !! was fitted to.
+  real(kind=f), parameter :: KZZ_CP_OVER_R = 7._f / 2._f
+  !! Universal gas constant [ erg / mol / K ], the cgs counterpart of RGAS_SI.
+  !! Written as PICASO writes it, so the two agree to the digit.
+  real(kind=f), parameter :: RGAS_CGS = 8.3143e7_f
+  !! Stefan-Boltzmann constant [ erg / cm^2 / s / K^4 ].
+  real(kind=f), parameter :: SIGMA_SB_CGS = 0.56687e-4_f
+  !! W/m^2 -> erg/cm^2/s
+  real(kind=f), parameter :: FLUX_SI2CGS = 1.e3_f
+  !! Pa -> barye
+  real(kind=f), parameter :: PA2BARYE = 1.e1_f
 
   !! Temperature perturbation used to measure the Jacobian [K].
   !!
@@ -237,6 +284,17 @@ module carma_rce
     real(kind=f) :: absorbed_sw = 0._f  !! shortwave absorbed by the column [W/m^2]
     real(kind=f) :: reflected_sw = 0._f !! shortwave reflected to space [W/m^2]
 
+    !! Whether the eddy diffusion profile follows the temperature profile.
+    integer      :: kzz_mode = I_KZZ_STATIC
+
+    !! Multiplier on the mixing length. One is the parameterisation as PICASO
+    !! has it, where L/H is diagnosed from the lapse rate and never exceeds
+    !! one. This is the only free parameter in the scheme, and it is here
+    !! because L/H is otherwise entirely determined by the profile: nothing
+    !! else lets a run ask what a longer or shorter mixing length would do.
+    !! Kzz goes as L^(4/3), so this scales the whole profile by its 4/3 power.
+    real(kind=f) :: kzz_mixl_scale = 1._f
+
     !! Which adiabat the convective interior follows.
     integer      :: adiabat = I_ADIABAT_PARMENTIER
     !! The tabulated gradient, only allocated for I_ADIABAT_TABLE.
@@ -262,6 +320,13 @@ module carma_rce
     real(kind=f), allocatable :: dtdt(:)
     !! Net upward flux at levels from the last solve [W/m^2].
     real(kind=f), allocatable :: fnet(:)
+    !! Eddy diffusion at levels from the last solve [cm^2/s]. Only refreshed
+    !! for I_KZZ_MIXING_LENGTH; the driver holds the input profile otherwise.
+    real(kind=f), allocatable :: kzz(:)
+    !! What the convective flux had to be scaled by to carry the internal flux
+    !! at the base of the column. A diagnostic: one means the last solve put
+    !! exactly the imposed flux through the deepest layer.
+    real(kind=f) :: kzz_rescale = 1._f
     !! Local radiative time constant per layer [s], used to stabilise the
     !! temperature update. See ``rce_update``.
     real(kind=f), allocatable :: tau_rad(:)
@@ -344,7 +409,7 @@ contains
   subroutine rce_init(rce, nz, nbin, ngroup, nband, igridv, ck_path, &
                       t_int, t_irr, t_star, mu0, w_surf, &
                       cp_cgs, grav_cgs, wtmol, &
-                      adiabat, adiabat_path, &
+                      adiabat, adiabat_path, kzz_mode, kzz_mixl_scale, &
                       mode, accel, dt_max, dt_tol, dtau_tol, gap_max, rc)
 
     implicit none
@@ -353,6 +418,8 @@ contains
     integer, intent(in)      :: nz, nbin, ngroup, nband, igridv
     character(len=*), intent(in) :: ck_path
     integer, intent(in)      :: adiabat     !! I_ADIABAT_PARMENTIER or _TABLE
+    integer, intent(in)      :: kzz_mode    !! I_KZZ_STATIC or _MIXING_LENGTH
+    real(kind=f), intent(in) :: kzz_mixl_scale !! multiplier on the mixing length
     character(len=*), intent(in) :: adiabat_path !! only read for _TABLE
     real(kind=f), intent(in) :: t_int       !! internal temperature [K]
     real(kind=f), intent(in) :: t_irr       !! irradiation temperature [K], 0 = isolated
@@ -410,6 +477,19 @@ contains
       if (rc < 0) return
     end if
 
+    rce%kzz_mode = kzz_mode
+
+    ! A non-positive multiplier would put a zero or negative mixing length into
+    ! a 4/3 power. Caught here rather than at the use site, which is inside the
+    ! per-layer loop of a pure routine with nowhere to report from.
+    if (kzz_mixl_scale <= 0._f) then
+      write(*,*) 'rce_init::ERROR - kzz_mixl_scale must be positive, got', &
+                 kzz_mixl_scale
+      rc = -1
+      return
+    end if
+    rce%kzz_mixl_scale = kzz_mixl_scale
+
     rce%mode     = mode
     rce%accel    = accel
     rce%dt_max   = dt_max
@@ -417,7 +497,7 @@ contains
     rce%dtau_tol = dtau_tol
     rce%gap_max  = gap_max
 
-    allocate(rce%dtdt(nz), rce%fnet(nz+1), rce%tau_rad(nz))
+    allocate(rce%dtdt(nz), rce%fnet(nz+1), rce%kzz(nz+1), rce%tau_rad(nz))
     allocate(rce%beta(rce%nwave, nz))
     allocate(rce%tau_c(rce%nband, nz), rce%w0_c(rce%nband, nz), &
              rce%g_c(rce%nband, nz))
@@ -438,6 +518,7 @@ contains
 
     rce%dtdt(:)    = 0._f
     rce%fnet(:)    = 0._f
+    rce%kzz(:)     = 0._f
     rce%tau_rad(:) = huge(0._f)
     rce%is_conv(:) = .false.
 
@@ -525,6 +606,7 @@ contains
 
     if (allocated(rce%dtdt))       deallocate(rce%dtdt)
     if (allocated(rce%fnet))       deallocate(rce%fnet)
+    if (allocated(rce%kzz))        deallocate(rce%kzz)
     if (allocated(rce%tau_rad))    deallocate(rce%tau_rad)
     if (allocated(rce%beta))       deallocate(rce%beta)
     if (allocated(rce%tau_c))      deallocate(rce%tau_c)
@@ -761,16 +843,37 @@ contains
 
     real(kind=f) :: grad
 
-    if (rce%adiabat == I_ADIABAT_TABLE) then
-      grad = rce_grad_ad(rce, tbar, sqrt(p_lo * p_hi))
-    else
-      grad = PARM_A - PARM_B * tbar
-    end if
+    grad = rce_grad(rce, tbar, sqrt(p_lo * p_hi))
 
     pfact = (p_lo / p_hi) ** max(grad, GRAD_AD_MIN)
 
     return
   end function rce_pfact
+
+
+  !! The adiabatic gradient ``d ln T / d ln p`` of the run's own adiabat.
+  !!
+  !! The one place that knows how the two adiabats are selected between. The
+  !! tabulated branch is an interpolation and the analytic one a closed form,
+  !! so they are separate functions; everything that needs a gradient without
+  !! caring which model produced it comes through here.
+  pure function rce_grad(rce, temp, pres) result(grad)
+
+    implicit none
+
+    type(rce_type), intent(in) :: rce
+    real(kind=f), intent(in)   :: temp   !! [K]
+    real(kind=f), intent(in)   :: pres   !! [Pa]
+    real(kind=f)               :: grad
+
+    if (rce%adiabat == I_ADIABAT_TABLE) then
+      grad = rce_grad_ad(rce, temp, pres)
+    else
+      grad = PARM_A - PARM_B * temp
+    end if
+
+    return
+  end function rce_grad
 
 
   !! Dry convective adjustment: mix away any superadiabatic gradient.
@@ -961,6 +1064,170 @@ contains
 
     return
   end subroutine rce_purge_thin_zones
+
+
+  !! Eddy diffusion from mixing length theory [cm^2/s].
+  !!
+  !! A port of PICASO's ``get_kzz`` (``picaso/climate.py``), term for term, so
+  !! that a column here and a column there with the same profile mix the same
+  !! way. The mixing length velocity is set by the convective heat flux, and
+  !! the mixing length itself by how close the layer's lapse rate sits to the
+  !! adiabatic one:
+  !!
+  !!   Kzz = scalef * H * (l/H)^(4/3) * ( R * F_conv / (rho * Cp) )^(1/3)
+  !!
+  !! with ``l = kzz_mixl_scale * max(0.1, min(1, dlnT/dlnp / grad_ad)) * H``.
+  !!
+  !! ``kzz_mixl_scale`` is the scheme's only free parameter and is 1 for the
+  !! parameterisation as PICASO has it; everything else about ``l/H`` is
+  !! diagnosed from the profile. Kzz goes as ``l^(4/3)``, so a scale of ``f``
+  !! moves the whole profile by ``f^(4/3)``, not by ``f``.
+  !!
+  !! It is evaluated in every layer, not only the convective ones. The floor on
+  !! ``l/H`` is what makes that meaningful: a stably stratified layer keeps a
+  !! small residual Kzz rather than none at all, which is the behaviour the
+  !! parameterisation was built to have and what keeps the profile continuous
+  !! across a radiative-convective boundary that moves during the run.
+  !!
+  !! The convective flux is whatever the radiation is not carrying: the flux
+  !! emerging from the top of the column, less the net radiative flux in the
+  !! layer. Three pieces of conditioning follow it, all of them PICASO's: an
+  !! overshoot floor limiting how fast it may fall with height, a rescale
+  !! putting the imposed internal flux through the base of the column, and an
+  !! absolute floor at ``sigma*(0.05*t_int)^4``. The cube root magnifies
+  !! whatever is left near zero, so a flux that dips negative between solves
+  !! would otherwise be fatal rather than merely small.
+  !!
+  !! **Units.** cgs throughout, against the module's SI. ``ekz`` is a CARMA
+  !! input in cm^2/s and the parameterisation's constants are cgs, so
+  !! converting once at the boundary is cheaper to read than carrying the
+  !! conversion through six expressions.
+  !!
+  !! Arrays are bottom-to-top, so the flux sweeps run in the opposite direction
+  !! to PICASO's. ``kzz`` is returned on levels, where CARMA wants it.
+  pure subroutine rce_kzz(rce, p, pl, t, fnet, kzz, rescale)
+
+    implicit none
+
+    type(rce_type), intent(in)  :: rce
+    real(kind=f), intent(in)    :: p(rce%nz)      !! layer pressure [Pa]
+    real(kind=f), intent(in)    :: pl(rce%nz+1)   !! level pressure [Pa]
+    real(kind=f), intent(in)    :: t(rce%nz)      !! layer temperature [K]
+    real(kind=f), intent(in)    :: fnet(rce%nz+1) !! net upward flux [W/m^2]
+    real(kind=f), intent(out)   :: kzz(rce%nz+1)  !! eddy diffusion [cm^2/s]
+    !! What the convective flux had to be scaled by at the base of the column.
+    real(kind=f), intent(out), optional :: rescale
+
+    integer      :: nz, iz
+    real(kind=f) :: chf(rce%nz), kz_lay(rce%nz), p_cgs(rce%nz)
+    real(kind=f) :: r_atmos, cp_kzz, grav_cgs, f_sum, f_target, flx_min
+    real(kind=f) :: dtdp, grad_ad, lapse, mixl, scale_h, rho, fscale, w
+
+    nz = rce%nz
+
+    ! The specific gas constant and the Cp the parameterisation was calibrated
+    ! with -- a diatomic ideal gas, deliberately not rce%cp. See KZZ_CP_OVER_R.
+    r_atmos  = RGAS_CGS / rce%wtmol
+    cp_kzz   = KZZ_CP_OVER_R * r_atmos
+    grav_cgs = rce%grav / ACC_CGS2SI
+
+    do iz = 1, nz
+      p_cgs(iz) = p(iz) * PA2BARYE
+    end do
+
+    ! What the column is *actually* radiating, against what it is being asked
+    ! to radiate. The two are equal only in equilibrium, and their ratio is the
+    ! correction applied to the convective flux below.
+    f_sum    = fnet(nz+1) * FLUX_SI2CGS
+    f_target = SIGMA_SB_CGS * rce%t_int**4
+    flx_min  = SIGMA_SB_CGS * (KZZ_TEFF_MIN * rce%t_int)**4
+
+    ! ---- convective flux ---------------------------------------------------
+    ! What the radiation is not carrying. The net flux lives on levels, so it
+    ! is averaged onto the layer the divergence is taken across.
+    !
+    ! The deepest layer is taken to be carrying the whole flux convectively.
+    ! That is true of any well formed column, and it is what the sweep and the
+    ! rescale below both anchor on.
+    !
+    ! With an incident beam this departs from PICASO, which separates the
+    ! infrared net flux from the shortwave and works with the infrared alone.
+    ! Here they arrive summed in `fnet`, so a layer that absorbed sunlight
+    ! shows up as having less left for convection to carry -- the right sign,
+    ! but not the same decomposition.
+    chf(1) = f_sum
+    do iz = 2, nz
+      chf(iz) = f_sum - 0.5_f * (fnet(iz) + fnet(iz+1)) * FLUX_SI2CGS
+    end do
+
+    ! Convective overshoot: the flux may not fall faster with height than a
+    ! fixed fraction of the pressure ratio. The 1/3 is arbitrary, and lets the
+    ! flux fall somewhat faster than the pressure does.
+    do iz = 2, nz
+      chf(iz) = max(chf(iz), &
+                    KZZ_CHF_FALL * (p_cgs(iz) / p_cgs(iz-1)) * chf(iz-1))
+    end do
+
+    ! Put the imposed internal flux through the base of the column, correcting
+    ! the layers above it by the same factor. Recorded because its departure
+    ! from one is how far the column is from the effective temperature it was
+    ! asked for -- a converged one rescales by exactly one.
+    if (chf(1) > 0._f) then
+      fscale = f_target / chf(1)
+    else
+      fscale = 1._f
+    end if
+
+    if (present(rescale)) rescale = fscale
+
+    do iz = 1, nz
+      chf(iz) = max(chf(iz) * fscale, flx_min)
+    end do
+
+    ! ---- mixing length -----------------------------------------------------
+    do iz = 1, nz
+      ! Lapse rate of the current profile, centred where there are neighbours
+      ! on both sides and one-sided at the two ends.
+      if (nz == 1) then
+        dtdp = 0._f
+      else if (iz == 1) then
+        dtdp = log(t(2) / t(1)) / log(p_cgs(2) / p_cgs(1))
+      else if (iz == nz) then
+        dtdp = log(t(nz) / t(nz-1)) / log(p_cgs(nz) / p_cgs(nz-1))
+      else
+        dtdp = log(t(iz+1) / t(iz-1)) / log(p_cgs(iz+1) / p_cgs(iz-1))
+      end if
+
+      grad_ad = max(rce_grad(rce, t(iz), p(iz)), GRAD_AD_MIN)
+      lapse   = min(1._f, dtdp / grad_ad)
+
+      scale_h = r_atmos * t(iz) / grav_cgs
+      ! The scale multiplies the mixing length after the floor, so it applies
+      ! uniformly to convective and stable layers alike rather than moving the
+      ! floor out from under the stable ones.
+      mixl    = rce%kzz_mixl_scale * max(KZZ_MIXL_MIN, lapse) * scale_h
+      rho     = p_cgs(iz) / (r_atmos * t(iz))
+
+      kz_lay(iz) = KZZ_SCALEF * scale_h * (mixl / scale_h)**(4._f/3._f) &
+                   * (r_atmos * chf(iz) / (rho * cp_kzz))**(1._f/3._f)
+    end do
+
+    ! ---- onto the levels ---------------------------------------------------
+    ! Linear in (ln Kzz, ln p), which is how Kzz is read and plotted, and held
+    ! at the end layers' values on the two boundary levels. Kzz spans orders of
+    ! magnitude, so extrapolating off the end of the column is not defensible
+    ! even across a single half-layer.
+    kzz(1)    = kz_lay(1)
+    kzz(nz+1) = kz_lay(nz)
+
+    do iz = 2, nz
+      w = log((pl(iz) * PA2BARYE) / p_cgs(iz-1)) &
+          / log(p_cgs(iz) / p_cgs(iz-1))
+      kzz(iz) = exp((1._f - w) * log(kz_lay(iz-1)) + w * log(kz_lay(iz)))
+    end do
+
+    return
+  end subroutine rce_kzz
 
 
   !! Reconstruct level temperatures from layer-centre values.
@@ -1515,6 +1782,7 @@ contains
     real(kind=f) :: dz_cm(rce%nz), damp(rce%nz)
     real(kind=f) :: xsec, dt_eff, dt0, dt_lay
     real(kind=f) :: dt_col(rce%nz), rhs(rce%nz), sol(rce%nz), dt_cap
+    real(kind=f) :: kzz_new(rce%nz+1), rescale_new
     integer      :: rad_idx(rce%nz), nrad, i, j
     logical      :: dense_ok, do_jac
     logical      :: do_solve
@@ -1553,6 +1821,16 @@ contains
 
     if (do_solve) then
       call rce_solve(rce, p, pl, t, radius, qext, ssa, asym)
+
+      ! Eddy diffusion rides on the same cadence: it is a function of the
+      ! convective flux, which is only meaningful against a fresh fnet. Taken
+      ! through locals because rce_kzz reads the column it is given and so
+      ! takes rce by intent(in), which its own outputs may not alias.
+      if (rce%kzz_mode == I_KZZ_MIXING_LENGTH) then
+        call rce_kzz(rce, p, pl, t, rce%fnet, kzz_new, rescale_new)
+        rce%kzz(:)     = kzz_new(:)
+        rce%kzz_rescale = rescale_new
+      end if
 
       ! The Jacobian costs 2*nz flux evaluations against the solve's one, so it
       ! gets its own, much slower trigger: it describes how the column responds
