@@ -1509,6 +1509,7 @@ contains
     ! The layer values are what each layer emits from; the level values give
     ! the solver the gradient across it. Both are needed because `tl` is an
     ! interpolation of `t` and so is blind to a layer-to-layer oscillation.
+    !$OMP PARALLEL DO PRIVATE(iband, iz) SCHEDULE(static)
     do iband = 1, rce%nband
       do iz = 1, nlev
         rce%be(iz, iband) = bbflux_wavenumber(rce%ck%wmin(iband), &
@@ -1523,6 +1524,7 @@ contains
                              - 0.5_f * (rce%be(iz, iband) + rce%be(iz+1, iband))
       end do
     end do
+    !$OMP END PARALLEL DO
 
     ! No incident radiation: the top boundary is the auto-emission branch with
     ! the factor that reproduces PICASO's, in top-down pressure terms.
@@ -1539,10 +1541,15 @@ contains
 
     rce%sw_hit(:) = .false.
 
-    ! One iteration per spectral point. The (iband, ig) nest is flattened so the
-    ! schedule can balance all nband*ng points in one go; each iteration writes
-    ! only its own column of the per-point arrays, which are summed in index
-    ! order after the loop.
+    ! One iteration per spectral point. The (iband, ig) nest is flattened so all
+    ! nband*ng points are balanced in one go; each iteration writes only its own
+    ! column of the per-point arrays, which are summed in index order after the
+    ! loop.
+    !
+    ! A static schedule rather than SCHEDULE(runtime): every point solves the
+    ! same size column for the same cost, so there is nothing for a dynamic
+    ! schedule to rebalance, and taking OMP_SCHEDULE here would tie this loop to
+    ! whatever value the far more schedule-sensitive loop in newstate.F90 wants.
     !$OMP PARALLEL DO &
     !$OMP& PRIVATE(iband, ig, iz, tau_gas, tau_ray, tau_cld, tau_tot, &
     !$OMP&         tau_sca, dtau_l, w0_l, g_l, fup_l, fdn_l, &

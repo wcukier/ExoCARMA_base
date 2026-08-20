@@ -253,6 +253,11 @@ contains
 
     nz = size(pres_pa)
 
+    ! Each layer interpolates the table independently and writes only its own
+    ! column of `beta`.
+    !$OMP PARALLEL DO &
+    !$OMP& PRIVATE(iz, iw, ip, it, wp, wt, k00, k01, k10, k11, lnk, scale) &
+    !$OMP& SCHEDULE(static)
     do iz = 1, nz
       call locate_clamped(tbl%lnp,  log(pres_pa(iz)), ip, wp)
       call locate_clamped(tbl%temp, temp_k(iz),       it, wt)
@@ -274,6 +279,7 @@ contains
         beta(iw, iz) = scale * exp(lnk)
       end do
     end do
+    !$OMP END PARALLEL DO
 
     return
   end subroutine ck_kappa_column

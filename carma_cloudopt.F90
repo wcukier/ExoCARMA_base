@@ -78,6 +78,11 @@ contains
     real(kind=f) :: xsec, qs
     real(kind=f) :: bext(nwave), bsca(nwave), bg(nwave)
 
+    ! Layers are independent; the band accumulators below are per-layer, so
+    ! each thread needs its own.
+    !$OMP PARALLEL DO &
+    !$OMP& PRIVATE(iz, ibin, igroup, iw, xsec, qs, bext, bsca, bg) &
+    !$OMP& SCHEDULE(static)
     do iz = 1, nz
 
       bext(:) = 0._f
@@ -123,6 +128,7 @@ contains
       end do
 
     end do
+    !$OMP END PARALLEL DO
 
   end subroutine cloud_optics_column
 
