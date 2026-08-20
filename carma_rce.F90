@@ -75,7 +75,7 @@ module carma_rce
   !! banded truncation below is only legitimate if a narrow band captures the
   !! operator, and that is a property of this discretisation, not of radiative
   !! transfer, so it has to be measured rather than assumed.
-  public :: rce_fluxes, rce_jacobian, rce_solve
+  public :: rce_fluxes, rce_jacobian, rce_solve, rce_optics_prep
   public :: I_RCE_EQUILIBRIUM, I_RCE_PHYSICAL
   public :: I_ADIABAT_PARMENTIER, I_ADIABAT_TABLE
 
@@ -277,8 +277,6 @@ module carma_rce
     !! Per-level incidence cosine, carried as an array so a sphericity
     !! correction can be added without changing the solver's interface.
     real(kind=f), allocatable :: mu_lev(:)
-    !! Shortwave flux workspace.
-    real(kind=f), allocatable :: sw_up(:), sw_dn(:)
 
     !! Diagnostics, refreshed on every solve.
     real(kind=f) :: absorbed_sw = 0._f  !! shortwave absorbed by the column [W/m^2]
@@ -357,15 +355,27 @@ module carma_rce
     real(kind=f), allocatable :: tau_c(:,:)     !! (nband, nz) cloud optical depth
     real(kind=f), allocatable :: w0_c(:,:)      !! (nband, nz)
     real(kind=f), allocatable :: g_c(:,:)       !! (nband, nz)
-    real(kind=f), allocatable :: be(:,:)        !! (nband, nz+1) band Planck [W/m^2/sr]
-    !! (nband, nz) band Planck at the layer centres [W/m^2/sr]. The levels
+    real(kind=f), allocatable :: be(:,:)        !! (nz+1, nband) band Planck [W/m^2/sr]
+    !! (nz, nband) band Planck at the layer centres [W/m^2/sr]. The levels
     !! above are interpolated from these, and an interpolation cannot see a
     !! layer-to-layer oscillation, so the solver is given both: the centres
     !! set how brightly each layer emits, the levels how that varies across it.
     real(kind=f), allocatable :: be_mid(:,:)
     real(kind=f), allocatable :: numden_grp(:,:,:) !! (nz, nbin, ngroup) [#/cm^3]
-    real(kind=f), allocatable :: dtau(:), w0(:), gasym(:)
-    real(kind=f), allocatable :: f_up(:), f_dn(:)
+    !! Per-spectral-point results, held rather than accumulated so the sum can
+    !! run in a fixed order afterwards: the spectral loop is threaded, and a
+    !! reduction over its iterations would otherwise make the total depend on
+    !! how the points were distributed across threads.
+    !!
+    !! These are the operands of the sum, not the summands. The accumulation
+    !! ``acc + wt*d`` contracts into a single fused multiply-add, so holding the
+    !! product ``wt*d`` would round twice where one rounding happens here; the
+    !! reduction repeats the original expression verbatim on these instead.
+    real(kind=f), allocatable :: dfl_w(:,:)      !! (nz+1, nwave) f_up - f_dn
+    real(kind=f), allocatable :: dfs_w(:,:)      !! (nz+1, nwave) sw_up - sw_dn
+    real(kind=f), allocatable :: tautot_w(:,:)   !! (nz, nwave)
+    real(kind=f), allocatable :: swt_w(:), swb_w(:), swr_w(:)
+    logical, allocatable      :: sw_hit(:)       !! did this point carry a beam
     real(kind=f), allocatable :: tl(:)          !! (nz+1) level temperature [K]
     real(kind=f), allocatable :: dz(:)          !! (nz) layer thickness [m]
 
@@ -501,11 +511,13 @@ contains
     allocate(rce%beta(rce%nwave, nz))
     allocate(rce%tau_c(rce%nband, nz), rce%w0_c(rce%nband, nz), &
              rce%g_c(rce%nband, nz))
-    allocate(rce%be(rce%nband, nz+1))
-    allocate(rce%be_mid(rce%nband, nz))
+    allocate(rce%be(nz+1, rce%nband))
+    allocate(rce%be_mid(nz, rce%nband))
     allocate(rce%numden_grp(nz, nbin, ngroup))
-    allocate(rce%dtau(nz), rce%w0(nz), rce%gasym(nz))
-    allocate(rce%f_up(nz+1), rce%f_dn(nz+1))
+    allocate(rce%dfl_w(nz+1, rce%nwave), rce%dfs_w(nz+1, rce%nwave))
+    allocate(rce%tautot_w(nz, rce%nwave))
+    allocate(rce%swt_w(rce%nwave), rce%swb_w(rce%nwave), rce%swr_w(rce%nwave))
+    allocate(rce%sw_hit(rce%nwave))
     allocate(rce%tl(nz+1), rce%dz(nz))
     allocate(rce%tau_num(nz), rce%tau_den(nz))
     allocate(rce%jac(nz,nz), rce%lu(nz,nz), rce%piv(nz), rce%t_jac(nz))
@@ -514,7 +526,7 @@ contains
     allocate(rce%is_conv(nz))
 
     allocate(rce%f0(rce%nband), rce%ray_fac(rce%nband))
-    allocate(rce%mu_lev(nz+1), rce%sw_up(nz+1), rce%sw_dn(nz+1))
+    allocate(rce%mu_lev(nz+1))
 
     rce%dtdt(:)    = 0._f
     rce%fnet(:)    = 0._f
@@ -615,11 +627,13 @@ contains
     if (allocated(rce%be))         deallocate(rce%be)
     if (allocated(rce%be_mid))     deallocate(rce%be_mid)
     if (allocated(rce%numden_grp)) deallocate(rce%numden_grp)
-    if (allocated(rce%dtau))       deallocate(rce%dtau)
-    if (allocated(rce%w0))         deallocate(rce%w0)
-    if (allocated(rce%gasym))      deallocate(rce%gasym)
-    if (allocated(rce%f_up))       deallocate(rce%f_up)
-    if (allocated(rce%f_dn))       deallocate(rce%f_dn)
+    if (allocated(rce%dfl_w))      deallocate(rce%dfl_w)
+    if (allocated(rce%dfs_w))      deallocate(rce%dfs_w)
+    if (allocated(rce%tautot_w))   deallocate(rce%tautot_w)
+    if (allocated(rce%swt_w))      deallocate(rce%swt_w)
+    if (allocated(rce%swb_w))      deallocate(rce%swb_w)
+    if (allocated(rce%swr_w))      deallocate(rce%swr_w)
+    if (allocated(rce%sw_hit))     deallocate(rce%sw_hit)
     if (allocated(rce%tl))         deallocate(rce%tl)
     if (allocated(rce%dz))         deallocate(rce%dz)
     if (allocated(rce%tau_num))    deallocate(rce%tau_num)
@@ -640,8 +654,6 @@ contains
     if (allocated(rce%f0))         deallocate(rce%f0)
     if (allocated(rce%ray_fac))    deallocate(rce%ray_fac)
     if (allocated(rce%mu_lev))     deallocate(rce%mu_lev)
-    if (allocated(rce%sw_up))      deallocate(rce%sw_up)
-    if (allocated(rce%sw_dn))      deallocate(rce%sw_dn)
 
     return
   end subroutine rce_destroy
@@ -1347,7 +1359,7 @@ contains
   !! two-stream problem is solved at each of the ``nband*ng`` points, and the
   !! results are summed with the correlated-k weights. The heating rate then
   !! follows from the flux divergence across each layer.
-  subroutine rce_solve(rce, p, pl, t, radius, qext, ssa, asym)
+  subroutine rce_solve(rce, p, pl, t)
 
     implicit none
 
@@ -1355,18 +1367,13 @@ contains
     real(kind=f), intent(in) :: p(rce%nz)      !! layer pressure [Pa]
     real(kind=f), intent(in) :: pl(rce%nz+1)   !! level pressure [Pa]
     real(kind=f), intent(in) :: t(rce%nz)      !! layer temperature [K]
-    real(kind=f), intent(in) :: radius(rce%nbin, rce%ngroup)  !! [cm]
-    real(kind=f), intent(in) :: qext(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: ssa(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: asym(rce%nband, rce%nbin, rce%ngroup)
 
     integer      :: nz, iz
     real(kind=f) :: dmass, tau_mean, emiss
 
     nz = rce%nz
 
-    call rce_fluxes(rce, p, pl, t, radius, qext, ssa, asym, &
-                    rce%fnet, rce%tau_num, rce%tau_den)
+    call rce_fluxes(rce, p, pl, t, rce%fnet, rce%tau_num, rce%tau_den)
 
     ! The internal flux is a boundary condition, not something to be inferred:
     ! the net flux through the base of the column is sigma*t_int^4 by
@@ -1423,8 +1430,41 @@ contains
   !! ``dz`` deliberately is not -- the altitude grid is regridded once per
   !! step, after the update, so within a step it is a constant and a
   !! temperature perturbation must not move it.
-  subroutine rce_fluxes(rce, p, pl, t, radius, qext, ssa, asym, &
-                        fnet, tau_num, tau_den)
+  !! Cloud optical depth, single-scattering albedo and asymmetry on the band
+  !! centres, for the cloud field currently in ``rce%numden_grp``.
+  !!
+  !! Separate from ``rce_fluxes`` because none of it depends on temperature.
+  !! ``rce_jacobian`` perturbs one layer at a time and would otherwise rebuild
+  !! an identical answer for each of its ``2*nz`` flux evaluations. Run this
+  !! once per cloud field, before any flux evaluation that reads ``rce%tau_c``,
+  !! ``rce%w0_c`` or ``rce%g_c``.
+  subroutine rce_optics_prep(rce, radius, qext, ssa, asym)
+
+    implicit none
+
+    type(rce_type), intent(inout) :: rce
+    real(kind=f), intent(in) :: radius(rce%nbin, rce%ngroup)  !! [cm]
+    real(kind=f), intent(in) :: qext(rce%nband, rce%nbin, rce%ngroup)
+    real(kind=f), intent(in) :: ssa(rce%nband, rce%nbin, rce%ngroup)
+    real(kind=f), intent(in) :: asym(rce%nband, rce%nbin, rce%ngroup)
+
+    integer      :: iz
+    real(kind=f) :: dz_cm(rce%nz)
+
+    do iz = 1, rce%nz
+      dz_cm(iz) = rce%dz(iz) * M2CM
+    end do
+
+    call cloud_optics_column(rce%nz, rce%nbin, rce%nband, rce%ngroup, &
+                             rce%numden_grp, radius, dz_cm, &
+                             qext, ssa, asym, &
+                             rce%tau_c, rce%w0_c, rce%g_c)
+
+    return
+  end subroutine rce_optics_prep
+
+
+  subroutine rce_fluxes(rce, p, pl, t, fnet, tau_num, tau_den)
 
     implicit none
 
@@ -1432,20 +1472,21 @@ contains
     real(kind=f), intent(in) :: p(rce%nz)      !! layer pressure [Pa]
     real(kind=f), intent(in) :: pl(rce%nz+1)   !! level pressure [Pa]
     real(kind=f), intent(in) :: t(rce%nz)      !! layer temperature [K]
-    real(kind=f), intent(in) :: radius(rce%nbin, rce%ngroup)  !! [cm]
-    real(kind=f), intent(in) :: qext(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: ssa(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: asym(rce%nband, rce%nbin, rce%ngroup)
 
     real(kind=f), intent(out) :: fnet(rce%nz+1)   !! net upward flux [W/m^2]
     real(kind=f), intent(out) :: tau_num(rce%nz)  !! Planck-weighted tau, numerator
     real(kind=f), intent(out) :: tau_den(rce%nz)  !! ... and its denominator
 
     integer      :: nz, nlev, iz, iband, ig, iw
-    real(kind=f) :: conc(rce%nz), dz_cm(rce%nz), tl(rce%nz+1)
-    !! (nband, nz) the part of each layer's emission its bounding levels
+    !! Per-point column workspace. Local, so each thread of the spectral loop
+    !! below gets its own.
+    real(kind=f) :: dtau_l(rce%nz), w0_l(rce%nz), g_l(rce%nz)
+    real(kind=f) :: fup_l(rce%nz+1), fdn_l(rce%nz+1)
+    real(kind=f) :: swup_l(rce%nz+1), swdn_l(rce%nz+1)
+    real(kind=f) :: conc(rce%nz), tl(rce%nz+1)
+    !! (nz, nband) the part of each layer's emission its bounding levels
     !! cannot see: the layer-centre Planck less the level mean.
-    real(kind=f) :: be_corr(rce%nband, rce%nz)
+    real(kind=f) :: be_corr(rce%nz, rce%nband)
     real(kind=f) :: btop_factor, tau_gas, tau_tot, wt, be_lay
     real(kind=f) :: tau_ray, tau_cld, tau_sca
     real(kind=f) :: sw_top, sw_bot, sw_ref
@@ -1459,17 +1500,10 @@ contains
     ! The ck tables are per molecule of the gas mixture, so the concentration
     ! is that of the whole atmosphere.
     do iz = 1, nz
-      conc(iz)  = p(iz) / (RGAS_SI * t(iz))
-      dz_cm(iz) = rce%dz(iz) * M2CM
+      conc(iz) = p(iz) / (RGAS_SI * t(iz))
     end do
 
     call ck_kappa_column(rce%ck, p, t, conc, rce%beta)
-
-    ! ---- cloud optics on band centres -------------------------------------
-    call cloud_optics_column(nz, rce%nbin, rce%nband, rce%ngroup, &
-                             rce%numden_grp, radius, dz_cm, &
-                             qext, ssa, asym, &
-                             rce%tau_c, rce%w0_c, rce%g_c)
 
     ! ---- band-integrated Planck at every level, and every layer -----------
     ! The layer values are what each layer emits from; the level values give
@@ -1477,16 +1511,16 @@ contains
     ! interpolation of `t` and so is blind to a layer-to-layer oscillation.
     do iband = 1, rce%nband
       do iz = 1, nlev
-        rce%be(iband, iz) = bbflux_wavenumber(rce%ck%wmin(iband), &
+        rce%be(iz, iband) = bbflux_wavenumber(rce%ck%wmin(iband), &
                                               rce%ck%wmax(iband), tl(iz))
       end do
 
       call bbflux_wavenumber_col(rce%ck%wmin(iband), rce%ck%wmax(iband), &
-                                 t(1:nz), rce%be_mid(iband, 1:nz))
+                                 t(1:nz), rce%be_mid(1:nz, iband))
 
       do iz = 1, nz
-        be_corr(iband, iz) = rce%be_mid(iband, iz) &
-                             - 0.5_f * (rce%be(iband, iz) + rce%be(iband, iz+1))
+        be_corr(iz, iband) = rce%be_mid(iz, iband) &
+                             - 0.5_f * (rce%be(iz, iband) + rce%be(iz+1, iband))
       end do
     end do
 
@@ -1503,9 +1537,20 @@ contains
     sw_bot = 0._f
     sw_ref = 0._f
 
-    do iband = 1, rce%nband
-      do ig = 1, rce%ng
-        iw = (iband - 1) * rce%ng + ig
+    rce%sw_hit(:) = .false.
+
+    ! One iteration per spectral point. The (iband, ig) nest is flattened so the
+    ! schedule can balance all nband*ng points in one go; each iteration writes
+    ! only its own column of the per-point arrays, which are summed in index
+    ! order after the loop.
+    !$OMP PARALLEL DO &
+    !$OMP& PRIVATE(iband, ig, iz, tau_gas, tau_ray, tau_cld, tau_tot, &
+    !$OMP&         tau_sca, dtau_l, w0_l, g_l, fup_l, fdn_l, &
+    !$OMP&         swup_l, swdn_l) &
+    !$OMP& SCHEDULE(static)
+    do iw = 1, rce%nwave
+        iband = (iw - 1) / rce%ng + 1
+        ig    = iw - (iband - 1) * rce%ng
 
         do iz = 1, nz
           tau_gas = rce%beta(iw, iz) * rce%dz(iz)
@@ -1524,7 +1569,7 @@ contains
           tau_cld = rce%tau_c(iband, iz)
           tau_tot = tau_gas + tau_cld + tau_ray
 
-          rce%dtau(iz) = tau_tot
+          dtau_l(iz) = tau_tot
 
           ! Scattering optical depth: the cloud's scattering part plus all of
           ! the Rayleigh, which is conservative.
@@ -1533,40 +1578,36 @@ contains
           if (tau_tot > 0._f) then
             ! Gas absorption does not scatter, so the scatterers are the cloud
             ! and the Rayleigh term.
-            rce%w0(iz) = tau_sca / tau_tot
+            w0_l(iz) = tau_sca / tau_tot
           else
-            rce%w0(iz) = 0._f
+            w0_l(iz) = 0._f
           end if
           ! The two-stream coefficients are singular at w0 == 1 exactly, which
           ! a non-absorbing grain in a transparent band can reach.
-          rce%w0(iz) = min(rce%w0(iz), 1._f - 1.e-12_f)
+          w0_l(iz) = min(w0_l(iz), 1._f - 1.e-12_f)
 
           ! Asymmetry is a scattering-weighted mean. Rayleigh is isotropic and
           ! so enters with g = 0, dragging the column's asymmetry down wherever
           ! it competes with the forward-peaked cloud.
           if (tau_sca > 0._f) then
-            rce%gasym(iz) = tau_cld * rce%w0_c(iband, iz) &
-                            * rce%g_c(iband, iz) / tau_sca
+            g_l(iz) = tau_cld * rce%w0_c(iband, iz) &
+                      * rce%g_c(iband, iz) / tau_sca
           else
-            rce%gasym(iz) = 0._f
+            g_l(iz) = 0._f
           end if
 
-          ! Planck-weighted mean optical depth, accumulated here so the
-          ! stabilisation timescale below costs nothing extra.
-          be_lay = rce%be_mid(iband, iz)
-          wt = rce%ck%weights(iw)
-          tau_num(iz) = tau_num(iz) + wt * be_lay * tau_tot
-          tau_den(iz) = tau_den(iz) + wt * be_lay
+          ! Held for the Planck-weighted mean optical depth, which the
+          ! reduction below forms.
+          rce%tautot_w(iz, iw) = tau_tot
         end do
 
-        call toon_lw_column(nz, rce%dtau, rce%w0, rce%gasym, &
-                            rce%be(iband, :), 0._f, -1, btop_factor, &
-                            .false., .false., rce%f_up, rce%f_dn, &
-                            be_corr_in=be_corr(iband, :))
+        call toon_lw_column(nz, dtau_l, w0_l, g_l, &
+                            rce%be(:, iband), 0._f, -1, btop_factor, &
+                            .false., .false., fup_l, fdn_l, &
+                            be_corr_in=be_corr(:, iband))
 
-        wt = rce%ck%weights(iw)
         do iz = 1, nlev
-          fnet(iz) = fnet(iz) + wt * (rce%f_up(iz) - rce%f_dn(iz))
+          rce%dfl_w(iz, iw) = fup_l(iz) - fdn_l(iz)
         end do
 
         ! ---- the incident beam, into the same net flux --------------------
@@ -1580,19 +1621,46 @@ contains
         if (rce%sw_on) then
           if (rce%f0(iband) > 0._f) then
             call toon_sw_column(nz, rce%f0(iband), rce%mu_lev, &
-                                rce%dtau, rce%w0, rce%gasym, rce%w_surf, &
-                                rce%sw_up, rce%sw_dn)
+                                dtau_l, w0_l, g_l, rce%w_surf, &
+                                swup_l, swdn_l)
 
             do iz = 1, nlev
-              fnet(iz) = fnet(iz) + wt * (rce%sw_up(iz) - rce%sw_dn(iz))
+              rce%dfs_w(iz, iw) = swup_l(iz) - swdn_l(iz)
             end do
 
-            sw_top = sw_top + wt * (rce%sw_dn(nlev) - rce%sw_up(nlev))
-            sw_bot = sw_bot + wt * (rce%sw_dn(1) - rce%sw_up(1))
-            sw_ref = sw_ref + wt * rce%sw_up(nlev)
+            rce%swt_w(iw) = swdn_l(nlev) - swup_l(nlev)
+            rce%swb_w(iw) = swdn_l(1) - swup_l(1)
+            rce%swr_w(iw) = swup_l(nlev)
+            rce%sw_hit(iw) = .true.
           end if
         end if
+    end do
+    !$OMP END PARALLEL DO
+
+    ! Sum in spectral-point order, which is the order the points were visited
+    ! in before the loop was threaded.
+    do iw = 1, rce%nwave
+      iband = (iw - 1) / rce%ng + 1
+      wt    = rce%ck%weights(iw)
+
+      do iz = 1, nz
+        be_lay = rce%be_mid(iz, iband)
+        tau_num(iz) = tau_num(iz) + wt * be_lay * rce%tautot_w(iz, iw)
+        tau_den(iz) = tau_den(iz) + wt * be_lay
       end do
+
+      do iz = 1, nlev
+        fnet(iz) = fnet(iz) + wt * rce%dfl_w(iz, iw)
+      end do
+
+      if (rce%sw_hit(iw)) then
+        do iz = 1, nlev
+          fnet(iz) = fnet(iz) + wt * rce%dfs_w(iz, iw)
+        end do
+        sw_top = sw_top + wt * rce%swt_w(iw)
+        sw_bot = sw_bot + wt * rce%swb_w(iw)
+        sw_ref = sw_ref + wt * rce%swr_w(iw)
+      end if
     end do
 
     ! What the column kept, and what it sent back. Both are diagnostics: the
@@ -1635,7 +1703,7 @@ contains
   !!
   !! Cost is ``2*nz`` flux evaluations, so this runs on its own slow cadence
   !! rather than on every solve; see ``rce_update``.
-  subroutine rce_jacobian(rce, p, pl, t, radius, qext, ssa, asym)
+  subroutine rce_jacobian(rce, p, pl, t)
 
     implicit none
 
@@ -1643,10 +1711,6 @@ contains
     real(kind=f), intent(in) :: p(rce%nz)
     real(kind=f), intent(in) :: pl(rce%nz+1)
     real(kind=f), intent(in) :: t(rce%nz)
-    real(kind=f), intent(in) :: radius(rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: qext(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: ssa(rce%nband, rce%nbin, rce%ngroup)
-    real(kind=f), intent(in) :: asym(rce%nband, rce%nbin, rce%ngroup)
 
     integer      :: nz, iz, k
     real(kind=f) :: dmass, hp, hm
@@ -1659,11 +1723,11 @@ contains
       ! difference carries a first-order bias that a centred one cancels.
       rce%t_pert(:) = t(:)
       rce%t_pert(k) = t(k) + JAC_DT
-      call rce_fluxes(rce, p, pl, rce%t_pert, radius, qext, ssa, asym, &
+      call rce_fluxes(rce, p, pl, rce%t_pert, &
                       rce%fnet_pert, rce%tnum_pert, rce%tden_pert)
 
       rce%t_pert(k) = t(k) - JAC_DT
-      call rce_fluxes(rce, p, pl, rce%t_pert, radius, qext, ssa, asym, &
+      call rce_fluxes(rce, p, pl, rce%t_pert, &
                       rce%fnet_minus, rce%tnum_pert, rce%tden_pert)
 
       ! The base flux is imposed, not solved for, so it does not respond to a
@@ -1820,7 +1884,10 @@ contains
     end if
 
     if (do_solve) then
-      call rce_solve(rce, p, pl, t, radius, qext, ssa, asym)
+      ! Once per cloud field: every flux evaluation below reads the result.
+      call rce_optics_prep(rce, radius, qext, ssa, asym)
+
+      call rce_solve(rce, p, pl, t)
 
       ! Eddy diffusion rides on the same cadence: it is a function of the
       ! convective flux, which is only meaningful against a fresh fnet. Taken
@@ -1845,7 +1912,7 @@ contains
       end if
 
       if (do_jac) then
-        call rce_jacobian(rce, p, pl, t, radius, qext, ssa, asym)
+        call rce_jacobian(rce, p, pl, t)
       else
         rce%jac_age = rce%jac_age + 1
       end if

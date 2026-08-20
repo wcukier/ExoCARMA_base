@@ -151,7 +151,12 @@ contains
     real(kind=f) :: B0(nlay), B1(nlay)
     real(kind=f) :: Cpm1(nlay), Cmm1(nlay), Cp(nlay), Cm(nlay)
     real(kind=f) :: Ep(nlay), Em(nlay), E1(nlay), E2(nlay), E3(nlay), E4(nlay)
-    real(kind=f) :: em1(nlay)
+    real(kind=f) :: Ep_mid(nlay), em1_mid(nlay)
+
+    !! exp(-dtau/u) and exp(-dtau/2u) at the quadrature angle in hand. Both
+    !! sweeps need them at the same (m, k), so they are built once per angle and
+    !! read twice.
+    real(kind=f) :: em2_m(nlay), em2m_m(nlay)
 
     real(kind=f) :: Af(2*nlay), Bf(2*nlay), Cf(2*nlay), Df(2*nlay), xkk(2*nlay)
     real(kind=f) :: Cwrk(2*nlay), Dwrk(2*nlay)
@@ -165,7 +170,7 @@ contains
     real(kind=f) :: up_mid(nlay), dn_mid(nlay)
 
     real(kind=f) :: g_sq, exptrm, Btop, Btop_g, Bsurf, bsurf_flux
-    real(kind=f) :: u, em2, em2_mid, Ep_mid, em1_mid, em3
+    real(kind=f) :: u, em2, em2_mid, em3
     real(kind=f) :: l_u_p1, l_u_m1, common_den, term_val, mid_val
 
     nlev = nlay + 1
@@ -235,6 +240,12 @@ contains
       E2(k)  = Ep(k) - gam(k) * Em(k)
       E3(k)  = gam(k) * Ep(k) + Em(k)
       E4(k)  = gam(k) * Ep(k) - Em(k)
+
+      ! The half-layer counterparts, for the midpoint fluxes. They carry no
+      ! angular dependence, so the quadrature below reads them rather than
+      ! rebuilding them at every angle.
+      Ep_mid(k)  = exp(min(0.5_f * lam(k) * dtau(k), EXPMAX))
+      em1_mid(k) = 1._f / Ep_mid(k)
     end do
 
     ! ---- boundary conditions -------------------------------------------------
@@ -320,8 +331,6 @@ contains
         sigma1(n) = TWOPI * (B0(n) - B1(n) * term_val)
         sigma2(n) = alpha2(n)
       end if
-
-      em1(n) = 1._f / exp(min(lam(n) * dtau(n), EXPMAX))
     end do
 
     ! ---- angular quadrature --------------------------------------------------
@@ -333,6 +342,11 @@ contains
     do m = 1, NMU
       u = UARR(m)
 
+      do k = 1, nlay
+        em2_m(k)  = exp(-dtau(k) / u)
+        em2m_m(k) = exp(-0.5_f * dtau(k) / u)
+      end do
+
       ! downward sweep, TOA to bottom
       if (top_emission_flag < 0) then
         Btop_g = (1._f - exp(-(dtau(1) * btop_factor) / u)) * be(1)
@@ -343,25 +357,23 @@ contains
       dn_g(1) = TWOPI * Btop_g
 
       do k = 1, nlay
-        em2    = exp(-dtau(k) / u)
+        em2    = em2_m(k)
         l_u_p1 = lam(k) * u + 1._f
         l_u_m1 = lam(k) * u - 1._f
 
         dn_g(k+1) = dn_g(k) * em2 &
                   + (xj(k) / l_u_p1) * (Ep(k) - em2) &
-                  + (xk(k) / l_u_m1) * (em2 - em1(k)) &
+                  + (xk(k) / l_u_m1) * (em2 - Em(k)) &
                   + sigma1(k) * (1._f - em2) &
                   + sigma2(k) * (u * em2 + dtau(k) - u)
 
         ! Same source-function integral, stopped at half the layer's optical
         ! depth (PICASO's flux_minus_mdpt).
-        em2_mid = exp(-0.5_f * dtau(k) / u)
-        Ep_mid  = exp(min(0.5_f * lam(k) * dtau(k), EXPMAX))
-        em1_mid = 1._f / Ep_mid
+        em2_mid = em2m_m(k)
 
         mid_val = dn_g(k) * em2_mid &
-                + (xj(k) / l_u_p1) * (Ep_mid - em2_mid) &
-                + (xk(k) / l_u_m1) * (em2_mid - em1_mid) &
+                + (xj(k) / l_u_p1) * (Ep_mid(k) - em2_mid) &
+                + (xk(k) / l_u_m1) * (em2_mid - em1_mid(k)) &
                 + sigma1(k) * (1._f - em2_mid) &
                 + sigma2(k) * (u * em2_mid + 0.5_f * dtau(k) - u)
 
@@ -376,8 +388,8 @@ contains
       end if
 
       do k = nlay, 1, -1
-        em2    = exp(-dtau(k) / u)
-        em3    = em1(k) * em2
+        em2    = em2_m(k)
+        em3    = Em(k) * em2
         l_u_m1 = lam(k) * u - 1._f
         l_u_p1 = lam(k) * u + 1._f
 
@@ -387,13 +399,11 @@ contains
                 + alpha1(k) * (1._f - em2) &
                 + alpha2(k) * (u - (dtau(k) + u) * em2)
 
-        em2_mid = exp(-0.5_f * dtau(k) / u)
-        Ep_mid  = exp(min(0.5_f * lam(k) * dtau(k), EXPMAX))
-        em1_mid = 1._f / Ep_mid
+        em2_mid = em2m_m(k)
 
         mid_val = up_g(k+1) * em2_mid &
-                + (g(k) / l_u_m1) * (Ep(k) * em2_mid - Ep_mid) &
-                + (h(k) / l_u_p1) * (em1_mid - em1(k) * em2_mid) &
+                + (g(k) / l_u_m1) * (Ep(k) * em2_mid - Ep_mid(k)) &
+                + (h(k) / l_u_p1) * (em1_mid(k) - Em(k) * em2_mid) &
                 + alpha1(k) * (1._f - em2_mid) &
                 + alpha2(k) * (u + 0.5_f * dtau(k) - (dtau(k) + u) * em2_mid)
 
