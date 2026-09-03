@@ -324,7 +324,7 @@ subroutine setupckern(carma, cstate, rc)
                 re_larg = re(k,i_larg,ig_larg)
   
                 ! <pe> is Peclet number.
-                pe  = re_larg*rmu(k) / (rhoa_cgs*di)
+                pe  = re_larg*rmu(k) / (rhoa_cgs*d_smal)
                 pe3 = pe**(1._f/3._f)
                 
                 ! <ccd> is convective diffusion coagulation coefficient
@@ -354,7 +354,7 @@ subroutine setupckern(carma, cstate, rc)
                   if( sk .lt. 0.08333334_f )then
                     e1 = 0.
                   else 
-                    e1 = (sk/(sk + 0.25_f))**2
+                    e1 = (sk/(sk + 0.5_f))**2
                   endif
      
                   if( sk .lt. 1.214_f )then
