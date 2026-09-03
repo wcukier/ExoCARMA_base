@@ -8,8 +8,8 @@
 !! The only consumer is ``carma_rce``, whose implicit temperature step needs a
 !! dense system solved: the Jacobian of the heating rate is measured to be
 !! dense on this vertical discretisation, with a tridiagonal capturing only
-!! about half of it at every depth. See the Phase 6 notes in
-!! ``claude/RCE_STATUS.md``.
+!! about half of it at every depth. Pinned by
+!! ``test_jacobian_is_not_tridiagonal`` in ``tests/integration/test_rce.py``.
 !!
 !! Kept in its own module, depending on nothing but the precision kind, so its
 !! correctness can be checked on its own against a reference implementation

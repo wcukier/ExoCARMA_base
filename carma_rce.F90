@@ -76,14 +76,7 @@ module carma_rce
   !! operator, and that is a property of this discretisation, not of radiative
   !! transfer, so it has to be measured rather than assumed.
   public :: rce_fluxes, rce_jacobian, rce_solve, rce_optics_prep
-  public :: I_RCE_EQUILIBRIUM, I_RCE_PHYSICAL
   public :: I_ADIABAT_PARMENTIER, I_ADIABAT_TABLE
-
-  !! Heating is accelerated relative to the microphysical clock, to reach
-  !! radiative-convective equilibrium in a tractable number of steps.
-  integer, parameter :: I_RCE_EQUILIBRIUM = 0
-  !! Heating runs on the microphysical clock, so the time history is physical.
-  integer, parameter :: I_RCE_PHYSICAL    = 1
 
   !! The eddy diffusion profile supplied at startup is held for the whole run.
   integer, parameter :: I_KZZ_STATIC        = 0
@@ -124,18 +117,15 @@ module carma_rce
   !! of sixty layers. It is what decides ``is_conv``; in a convecting column
   !! CONV_ITERMAX, not this, is what ends the sweeps.
   real(kind=f), parameter :: CONV_TOL     = 1.e-9_f
-  !! Cap on the adjustment's sweeps. Raised from the reference's 10 because
+  !! Cap on the adjustment's sweeps. Higher than the reference's 10 because
   !! ``pfact`` there is a constant, which makes an unstable pair repairable in
   !! a single pass, whereas here it depends on the temperatures being adjusted.
   !!
-  !! Reaching an exactly neutral column takes far more sweeps than this -- the
-  !! pairwise mixing relaxes the profile diffusively, so a sixty-layer column
-  !! converges at the rate a Gauss-Seidel sweep does. Stopping short is by
-  !! design and is how the reference uses the scheme too: the adjustment runs
-  !! every timestep against a profile the previous step already left nearly
-  !! neutral, so the residual relaxes across steps rather than within one call.
-  !! Every sweep conserves enthalpy exactly, so a partial adjustment is a
-  !! smaller correction, never a wrong one. ``resid`` reports what is left.
+  !! Stopping short of an exactly neutral column is by design: the adjustment
+  !! runs every timestep against a profile the previous step already left
+  !! nearly neutral, so the residual relaxes across steps rather than within
+  !! one call. Every sweep conserves enthalpy exactly, so a partial adjustment
+  !! is a smaller correction, never a wrong one. ``resid`` reports what is left.
   integer, parameter      :: CONV_ITERMAX = 30
 
   !! Fewest layers a convective zone may span. Flags are set pairwise, so two
@@ -208,14 +198,11 @@ module carma_rce
 
   !! Floor on the interval between re-measurements, whatever the drift says.
   !!
-  !! Without it the drift trigger defeats the whole cadence. During spin-up a
-  !! column far from equilibrium moves by tens of kelvin *per step* -- measured
-  !! at 57 K/step on the 196-band case -- so any drift threshold worth having
-  !! fires every step, and each firing costs 2*nz flux evaluations. That took
-  !! the run from minutes to an estimated forty hours. The Jacobian being
-  !! somewhat stale costs accuracy in the step direction, which the trust
-  !! region and Levenberg damping already handle; rebuilding it every step
-  !! costs the run.
+  !! Without it the drift trigger defeats the cadence: during spin-up a column
+  !! far from equilibrium moves by tens of kelvin per step, so any useful drift
+  !! threshold fires every step, at 2*nz flux evaluations each. A somewhat
+  !! stale Jacobian costs accuracy in the step direction, which the trust
+  !! region and Levenberg damping already handle.
   integer, parameter      :: JAC_GAP_MIN = 50
 
   !! Trust radius on the implicit step [K]: the largest |dT| any layer may take
@@ -225,10 +212,8 @@ module carma_rce
   !! ``dt_max`` is a user-facing backstop that a run may legitimately disable;
   !! the trust radius is what keeps a Newton step honest when the Jacobian is
   !! only an approximation to a nonlinear problem. Far from equilibrium the
-  !! linear model happily predicts a step of thousands of kelvin, and taking it
-  !! sends the column through zero temperature and straight to NaN -- which is
-  !! exactly what a real 196-band column did within fifty steps when the two
-  !! were conflated and the backstop was off.
+  !! linear model predicts steps of thousands of kelvin, which would take the
+  !! column through zero temperature and into NaN.
   real(kind=f), parameter :: DT_TRUST = 20._f
 
   !! erg/g/K -> J/kg/K
@@ -245,7 +230,6 @@ module carma_rce
     integer      :: nbin    = 0     !! size bins
     integer      :: ngroup  = 0     !! particle groups
     integer      :: igridv  = 0     !! vertical grid type
-    integer      :: mode    = I_RCE_EQUILIBRIUM
 
     real(kind=f) :: t_int   = 0._f  !! internal temperature [K]
     real(kind=f) :: cp      = 0._f  !! specific heat [J/kg/K]
@@ -293,6 +277,12 @@ module carma_rce
     !! Kzz goes as L^(4/3), so this scales the whole profile by its 4/3 power.
     real(kind=f) :: kzz_mixl_scale = 1._f
 
+    !! Half-width, in layers, of the smoothing applied to the lapse rate that
+    !! sets the mixing length. Zero is off, and is PICASO's behaviour. See the
+    !! smoothing block in ``rce_kzz`` for why the lapse rate is the term worth
+    !! smoothing.
+    integer      :: kzz_lapse_smooth = 0
+
     !! Which adiabat the convective interior follows.
     integer      :: adiabat = I_ADIABAT_PARMENTIER
     !! The tabulated gradient, only allocated for I_ADIABAT_TABLE.
@@ -301,7 +291,10 @@ module carma_rce
     real(kind=f), allocatable :: ad_p(:)
     real(kind=f), allocatable :: ad_grad(:,:)
 
-    real(kind=f) :: accel   = 1._f  !! heating acceleration factor
+    !! Heating acceleration factor: decouples the radiative clock from the
+    !! microphysical one, to reach equilibrium in a tractable number of
+    !! steps. 1 keeps the two together, so the time history is physical.
+    real(kind=f) :: accel   = 1._f
     real(kind=f) :: dt_max  = 0.5_f !! per-step |dT| clamp [K]
     real(kind=f) :: dt_tol  = 1._f  !! drift before re-solving [K]
     real(kind=f) :: dtau_tol = 0.02_f !! cloud cross-section change before re-solving
@@ -419,8 +412,8 @@ contains
   subroutine rce_init(rce, nz, nbin, ngroup, nband, igridv, ck_path, &
                       t_int, t_irr, t_star, mu0, w_surf, &
                       cp_cgs, grav_cgs, wtmol, &
-                      adiabat, adiabat_path, kzz_mode, kzz_mixl_scale, &
-                      mode, accel, dt_max, dt_tol, dtau_tol, gap_max, rc)
+                      adiabat, adiabat_path, kzz_mode, kzz_mixl_scale, kzz_lapse_smooth, &
+                      accel, dt_max, dt_tol, dtau_tol, gap_max, rc)
 
     implicit none
 
@@ -430,6 +423,7 @@ contains
     integer, intent(in)      :: adiabat     !! I_ADIABAT_PARMENTIER or _TABLE
     integer, intent(in)      :: kzz_mode    !! I_KZZ_STATIC or _MIXING_LENGTH
     real(kind=f), intent(in) :: kzz_mixl_scale !! multiplier on the mixing length
+    integer, intent(in)      :: kzz_lapse_smooth !! lapse smoothing half-width [layers]
     character(len=*), intent(in) :: adiabat_path !! only read for _TABLE
     real(kind=f), intent(in) :: t_int       !! internal temperature [K]
     real(kind=f), intent(in) :: t_irr       !! irradiation temperature [K], 0 = isolated
@@ -439,7 +433,6 @@ contains
     real(kind=f), intent(in) :: cp_cgs      !! [erg/g/K]
     real(kind=f), intent(in) :: grav_cgs    !! [cm/s^2]
     real(kind=f), intent(in) :: wtmol       !! [g/mol]
-    integer, intent(in)      :: mode
     real(kind=f), intent(in) :: accel, dt_max, dt_tol, dtau_tol
     integer, intent(in)      :: gap_max
     integer, intent(inout)   :: rc
@@ -500,7 +493,14 @@ contains
     end if
     rce%kzz_mixl_scale = kzz_mixl_scale
 
-    rce%mode     = mode
+    if (kzz_lapse_smooth < 0) then
+      write(*,*) 'rce_init::ERROR - kzz_lapse_smooth must be non-negative, got', &
+                 kzz_lapse_smooth
+      rc = -1
+      return
+    end if
+    rce%kzz_lapse_smooth = kzz_lapse_smooth
+
     rce%accel    = accel
     rce%dt_max   = dt_max
     rce%dt_tol   = dt_tol
@@ -1110,6 +1110,13 @@ contains
   !! whatever is left near zero, so a flux that dips negative between solves
   !! would otherwise be fatal rather than merely small.
   !!
+  !! ``kzz_lapse_smooth`` optionally runs a centred mean over the lapse rate
+  !! before the mixing length is formed from it. PICASO smooths nothing; this is
+  !! here because on a real column the lapse ratio, not the flux, is what makes
+  !! Kzz spiky -- it is a finite difference of a discretised temperature
+  !! profile, and differencing amplifies whatever layer-to-layer structure the
+  !! radiative-convective solve leaves behind. Zero reproduces PICASO exactly.
+  !!
   !! **Units.** cgs throughout, against the module's SI. ``ekz`` is a CARMA
   !! input in cm^2/s and the parameterisation's constants are cgs, so
   !! converting once at the boundary is cheaper to read than carrying the
@@ -1130,10 +1137,11 @@ contains
     !! What the convective flux had to be scaled by at the base of the column.
     real(kind=f), intent(out), optional :: rescale
 
-    integer      :: nz, iz
+    integer      :: nz, iz, nwin
     real(kind=f) :: chf(rce%nz), kz_lay(rce%nz), p_cgs(rce%nz)
+    real(kind=f) :: dtdp(rce%nz), dtdp_raw(rce%nz)
     real(kind=f) :: r_atmos, cp_kzz, grav_cgs, f_sum, f_target, flx_min
-    real(kind=f) :: dtdp, grad_ad, lapse, mixl, scale_h, rho, fscale, w
+    real(kind=f) :: grad_ad, lapse, mixl, scale_h, rho, fscale, w
 
     nz = rce%nz
 
@@ -1197,21 +1205,35 @@ contains
     end do
 
     ! ---- mixing length -----------------------------------------------------
+    ! Lapse rate of the current profile, centred where there are neighbours on
+    ! both sides and one-sided at the two ends.
     do iz = 1, nz
-      ! Lapse rate of the current profile, centred where there are neighbours
-      ! on both sides and one-sided at the two ends.
       if (nz == 1) then
-        dtdp = 0._f
+        dtdp(iz) = 0._f
       else if (iz == 1) then
-        dtdp = log(t(2) / t(1)) / log(p_cgs(2) / p_cgs(1))
+        dtdp(iz) = log(t(2) / t(1)) / log(p_cgs(2) / p_cgs(1))
       else if (iz == nz) then
-        dtdp = log(t(nz) / t(nz-1)) / log(p_cgs(nz) / p_cgs(nz-1))
+        dtdp(iz) = log(t(nz) / t(nz-1)) / log(p_cgs(nz) / p_cgs(nz-1))
       else
-        dtdp = log(t(iz+1) / t(iz-1)) / log(p_cgs(iz+1) / p_cgs(iz-1))
+        dtdp(iz) = log(t(iz+1) / t(iz-1)) / log(p_cgs(iz+1) / p_cgs(iz-1))
       end if
+    end do
 
+    ! Centred running mean, the window shrinking symmetrically towards each end
+    ! so the one-sided end derivatives come back unchanged. Applied here rather
+    ! than to the ratio below, since grad_ad contributes no noise of its own.
+    ! See the header for why the lapse rate is the term worth smoothing.
+    if (rce%kzz_lapse_smooth > 0 .and. nz > 2) then
+      dtdp_raw(:) = dtdp(:)
+      do iz = 1, nz
+        nwin = min(rce%kzz_lapse_smooth, iz - 1, nz - iz)
+        dtdp(iz) = sum(dtdp_raw(iz-nwin:iz+nwin)) / real(2 * nwin + 1, f)
+      end do
+    end if
+
+    do iz = 1, nz
       grad_ad = max(rce_grad(rce, t(iz), p(iz)), GRAD_AD_MIN)
-      lapse   = min(1._f, dtdp / grad_ad)
+      lapse   = min(1._f, dtdp(iz) / grad_ad)
 
       scale_h = r_atmos * t(iz) / grav_cgs
       ! The scale multiplies the mixing length after the floor, so it applies
@@ -1931,11 +1953,7 @@ contains
     end if
 
     ! ---- apply the held heating rate to every layer -----------------------
-    if (rce%mode == I_RCE_EQUILIBRIUM) then
-      dt_eff = dtime * rce%accel
-    else
-      dt_eff = dtime
-    end if
+    dt_eff = dtime * rce%accel
 
     ! Backward Euler on the coupled column:
     !
