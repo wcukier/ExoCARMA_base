@@ -112,7 +112,7 @@ subroutine setupvf_std(carma, cstate, j, rc)
       vf(k,i,j) = (ONE * 2._f / 9._f) * rhop_wet(k,i,j) * r_wet(k,i,j)**2 &
         * grav(k) * bpm(k,i,j) / rmu(k) - winds(k)    !PETER
 
-      re(k,i,j) = 2. * rhoa_cgs * r_wet(k,i,j) * vf(k,i,j) / rmu(k)
+      re(k,i,j) = 2. * rhoa_cgs * r_wet(k,i,j) * (vf(k,i,j) + winds(k)) / rmu(k)
 
       re_keepsign = re(k,i,j) / abs(re(k,i,j))                                                !PETER
       re(k,i,j) = abs(re(k,i,j))                                                              !PETER
@@ -142,7 +142,7 @@ subroutine setupvf_std(carma, cstate, j, rc)
           ! drag coefficient from quadratic fit y(x) when Re < 1,000
 
           vf(k,i,j) = re(k,i,j) * re_keepsign * rmu(k) / &
-		        (2._f * r_wet(k,i,j) * rhoa_cgs)                  !PETER
+		        (2._f * r_wet(k,i,j) * rhoa_cgs) - winds(k)                 !PETER
         else 
         
           ! drag coefficient = 0.45 independent of Reynolds number when Re > 1,000
