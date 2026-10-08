@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 #include "carma_globaer.h"
 
 !! This routine handles all preliminary setup at the beginning
@@ -31,6 +33,8 @@ subroutine prestep(carma, cstate, rc)
   integer                        :: iz      ! z index
   integer                        :: igrp    ! group index
   integer                        :: igas    ! gas index
+  integer                        :: igroup  ! group index
+  logical                        :: any_supsat
   integer                        :: ibin    ! bin index
   integer                        :: ielem   ! element index
   integer                        :: iep
@@ -60,9 +64,16 @@ subroutine prestep(carma, cstate, rc)
           ! (i.e. supersaturated) and d_gc is negative. For better performance,
           ! substep the gas unless both of these are true. This might run into
           ! trouble if d_t is large and negative.
-!          if (d_gc(iz, igas) < 0._f) then
-          if ((d_gc(iz, igas) < 0._f) .and. ((supsatiold(iz, igas) > 0._f) .or. &
-		(supsati(iz, igas) > 0._f))) then
+          ! A gas is "supersaturated" here if any condensate keyed to it is.
+          any_supsat = .false.
+          do igroup = 1, NGROUP
+            if (igrowgas(ienconc(igroup)) == igas) then
+              if ((supsatiold(iz, igroup) > 0._f) .or. &
+                  (supsati(iz, igroup) > 0._f)) any_supsat = .true.
+            end if
+          end do
+
+          if ((d_gc(iz, igas) < 0._f) .and. any_supsat) then
           
             ! Start from the new state and don't step the gas.
             d_gc(iz, igas) = 0._f

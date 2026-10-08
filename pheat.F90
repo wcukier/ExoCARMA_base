@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -84,18 +86,19 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
   real(kind=f)                         :: dtpl                    ! last change in particle temperature (K)
   real(kind=f)                         :: ddtp                    ! change in particle temperature in last iteration (K)
   real(kind=f)                         :: plkint                  ! planck intensity
+  integer                              :: ia                      ! active key reactant
   
   ! <akas> is combined kelvin (curvature) and solute factors.
   !
   ! Ignore solute factor for ice particles.
   if( is_grp_ice(igroup)  )then
-    expon = akelvini(iz,igas) / rup_wet(iz,ibin,igroup)
+    expon = akelvini(iz,igroup) / rup_wet(iz,ibin,igroup)
     expon = max(-POWMAX, expon)
     akas  = exp( expon )
   elseif (igas .eq. igash2so4) then
     argsol = wtpct(iz)/100._f/WTMOL_H2SO4 / &
       ( (1._f - wtpct(iz)/100._f)/WTMOL_H2O + wtpct(iz)/100._f/WTMOL_H2SO4 )
-    expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup)
+    expon = akelvin(iz,igroup)  / rup_wet(iz,ibin,igroup)
     expon = max(-POWMAX, expon)
     akas  = exp( expon ) * argsol
   else
@@ -157,7 +160,7 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
       !      endif 
       !    endif    ! nelemg(igroup) > 1
 
-    expon = akelvin(iz,igas)  / rup_wet(iz,ibin,igroup) - argsol 
+    expon = akelvin(iz,igroup)  / rup_wet(iz,ibin,igroup) - argsol 
     expon = max(-POWMAX, expon)
     akas  = exp( expon )
   endif
@@ -166,21 +169,33 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
   ! allows haze droplets to exist under supersaturated conditions;
   ! when below supersaturation, haze droplets will evaporate.
 !          if( (.not. is_grp_ice(igroup)) .and. (akas .lt. 1._f) .and. &
-!              (supsatl(iz,igas) .lt. 0._f) ) akas = 1._f
+!              (supsatl(iz,igroup) .lt. 0._f) ) akas = 1._f
 
   ! <dmdt> is growth rate in mass space [g/s].
-  g0 =  gro(iz,ibin+1,igroup,igas)
-  g1 = gro1(iz,ibin+1,igroup,igas)
-  g2 = gro2(iz,igroup,igas)
+  g0 =  gro(iz,ibin+1,igroup)
+  g1 = gro1(iz,ibin+1,igroup)
+  g2 = gro2(iz,igroup)
   !write(*,*) iz,ibin,igroup,igas,g0,g1,g2
 
   if( is_grp_ice(igroup) )then
-    ss   = supsati(iz,igas)
-    pvap = pvapi(iz,igas)
+    ss   = supsati(iz,igroup)
+    pvap = pvapi(iz,igroup)
   else
-    ss = supsatl(iz,igas)
-    pvap = pvapl(iz,igas)
+    ss = supsatl(iz,igroup)
+    pvap = pvapl(iz,igroup)
   endif
+
+  ! A condensate whose key reactant has swapped grows by the impingement of
+  ! that reactant: its kernels, and its equilibrium partial pressure p_a / S_r.
+  if (do_key_swap) then
+    ia = ikey(iz,igroup)
+    if ((ia /= igas) .and. (ia /= 0)) then
+      g0   = grok(iz,ibin+1,igroup,ia)
+      g1   = gro1k(iz,ibin+1,igroup,ia)
+      pvap = max(gc(iz,ia), 0._f) / (zmet(iz)*xmet(iz)*ymet(iz)) * (RGAS / gwtmol_dif(ia)) * t(iz) &
+             / max(ss + 1._f, 1.e-30_f)
+    end if
+  end if
 
 
   ! If particle heating is being considered, then determine qrad and tpart to
@@ -196,9 +211,9 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
   
     ! Latent heat of condensing gas 
     if( is_grp_ice(igroup) )then
-      rlh = rlhe(iz,igas) + rlhm(iz,igas)
+      rlh = rlhe(iz,igroup) + rlhm(iz,igroup)
     else
-      rlh = rlhe(iz,igas)
+      rlh = rlhe(iz,igroup)
     endif
   
     ! The particle temperature must be solved for by iterating, with an
@@ -286,12 +301,12 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
       ! energy being absorbed.
       if ((dmdt * dtime_in) .le. (- rmass(ibin+1, igroup))) then
         dtp = ((rlh * (- rmass(ibin+1, igroup) / dtime_in)) + qrad) / &
-               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup,igas) &
-		* ft(iz,ibin+1,igroup,igas))
+               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup) &
+		* ft(iz,ibin+1,igroup))
       else
         dtp = ((rlh * dmdt) + qrad) / &
-               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup,igas) &
-		* ft(iz,ibin+1,igroup,igas))
+               (4._f * PI * rlow_wet(iz,ibin+1,igroup) * thcondnc(iz,ibin+1,igroup) &
+		* ft(iz,ibin+1,igroup))
       end if
 
       tp = t(iz) + dtp
@@ -343,8 +358,8 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
 
         ! Now add in the heating from thermal conduction.
         phprod(iz) = phprod(iz) + 4._f * PI * rlow_wet(iz,ibin+1,igroup) * &
-		thcondnc(iz,ibin+1,igroup,igas) * &
-                ft(iz,ibin+1,igroup,igas) * dtp * pc(iz,ibin+1,iepart) &
+		thcondnc(iz,ibin+1,igroup) * &
+                ft(iz,ibin+1,igroup) * dtp * pc(iz,ibin+1,iepart) &
 		/ (CP * rhoa(iz))
       end if
     end if

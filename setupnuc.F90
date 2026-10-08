@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -72,9 +74,9 @@ subroutine setupnuc(carma, cstate, rc)
           if (isol .ne. 0) then
             ! This is term "B" in Pruppacher and Klett's eqn. 6-28.=
             do ibin = 1,NBIN
-                bsol = 3._f*sol_ions(isol)*rmass(ibin,igroup)*gwtmol(igas) &
+                bsol = 3._f*sol_ions(isol)*rmass(ibin,igroup)*gwtmol(igroup) &
                   / ( 4._f*PI*solwtmol(isol)*RHO_W )
-                scrit(k,ibin,igroup,igas) = sqrt( 4._f * akelvin(k,igas)**3 / ( 27._f * bsol ) )
+                scrit(k,ibin,igroup) = sqrt( 4._f * akelvin(k,igroup)**3 / ( 27._f * bsol ) )
 	    enddo
 	  endif
 

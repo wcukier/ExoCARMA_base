@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 !! The CARMA state module contains the atmospheric data for use with the CARMA
 !! module. This implementation has been customized to work within other model 
 !! frameworks. CARMA adds a lot of extra state information (atmospheric
@@ -46,10 +48,12 @@ module carmastate_mod
   public CARMASTATE_GetDetrain
   public CARMASTATE_GetDiag		!PETER
   public CARMASTATE_GetGas
+  public CARMASTATE_GetGroup
   public CARMASTATE_GetState
   public CARMASTATE_SetBin
   public CARMASTATE_SetDetrain
   public CARMASTATE_SetGas
+  public CARMASTATE_PrepareStep
   public CARMASTATE_SetState
   public CARMASTATE_Step
   
@@ -377,6 +381,7 @@ contains
     
     integer                                 :: iz
     integer                                 :: igas
+    integer                                 :: igroup
     real(kind=f)                            :: rvap
     real(kind=f)                            :: pvap_liq
     real(kind=f)                            :: pvap_ice
@@ -500,10 +505,11 @@ contains
       end if
     end if
 
-    ! Determine the gas supersaturations.
+    ! Determine the condensate supersaturations (per group; groups may
+    ! share a gas reservoir).
     do iz = 1, cstate%f_NZ
-      do igas = 1, cstate%f_carma%f_NGAS
-        call supersat(cstate%f_carma, cstate, iz, igas, rc)
+      do igroup = 1, cstate%f_carma%f_NGROUP
+        call supersat(cstate%f_carma, cstate, iz, igroup, rc)
         if (rc < 0) return
       end do
     end do
@@ -585,6 +591,7 @@ contains
     integer                               :: NBIN
     integer                               :: NGAS
     integer                               :: NWAVE
+    integer                               :: igroup
     
     ! Assume success.
     rc = RC_OK
@@ -641,7 +648,7 @@ contains
         cstate%f_wtpct(NZ), &
         cstate%f_rmu(NZ), &
         cstate%f_thcond(NZ), &
-        cstate%f_thcondnc(NZ,NBIN,NGROUP,NGAS), &
+        cstate%f_thcondnc(NZ,NBIN,NGROUP), &
         cstate%f_dpc_sed(NBIN,NELEM), &
         cstate%f_pconmax(NZ,NGROUP), &
         cstate%f_pcl(NZ,NBIN,NELEM), &
@@ -754,12 +761,12 @@ contains
       
       if (cstate%f_carma%f_NGAS > 0) then
         allocate( &
-          cstate%f_pvapl(NZ,NGAS), &
-          cstate%f_pvapi(NZ,NGAS), &
-          cstate%f_supsatl(NZ,NGAS), &
-          cstate%f_supsati(NZ,NGAS), &
-          cstate%f_supsatlold(NZ,NGAS), &
-          cstate%f_supsatiold(NZ,NGAS), &
+          cstate%f_pvapl(NZ,NGROUP), &
+          cstate%f_pvapi(NZ,NGROUP), &
+          cstate%f_supsatl(NZ,NGROUP), &
+          cstate%f_supsati(NZ,NGROUP), &
+          cstate%f_supsatlold(NZ,NGROUP), &
+          cstate%f_supsatiold(NZ,NGROUP), &
           stat=ier)
         if (ier /= 0) then
           if (cstate%f_carma%f_do_print) write(cstate%f_carma%f_LUNOPRT, *) &
@@ -773,20 +780,23 @@ contains
       if (cstate%f_carma%f_do_grow) then
         allocate( &
           cstate%f_diffus(NZ,NGAS), &
-          cstate%f_rlhe(NZ,NGAS), &
-          cstate%f_rlhm(NZ,NGAS), &
+          cstate%f_rlhe(NZ,NGROUP), &
+          cstate%f_rlhm(NZ,NGROUP), &
           cstate%f_surfctwa(NZ), &
           cstate%f_surfctiw(NZ), &
           cstate%f_surfctia(NZ), &
-          cstate%f_akelvin(NZ,NGAS), &
-          cstate%f_akelvini(NZ,NGAS), &
-          cstate%f_surfacetens(NZ,NGAS), &
-          cstate%f_desorption(NGAS), &
-          cstate%f_ft(NZ,NBIN,NGROUP,NGAS), &
-          cstate%f_gro(NZ,NBIN,NGROUP,NGAS),  &
-          cstate%f_gro1(NZ,NBIN,NGROUP,NGAS),  &
-          cstate%f_gro2(NZ,NGROUP,NGAS),  &
-          cstate%f_scrit(NZ,NBIN,NGROUP,NGAS), &
+          cstate%f_akelvin(NZ,NGROUP), &
+          cstate%f_akelvini(NZ,NGROUP), &
+          cstate%f_surfacetens(NZ,NGROUP), &
+          cstate%f_desorption(NGROUP), &
+          cstate%f_ft(NZ,NBIN,NGROUP), &
+          cstate%f_gro(NZ,NBIN,NGROUP),  &
+          cstate%f_gro1(NZ,NBIN,NGROUP),  &
+          cstate%f_grok(NZ,NBIN,NGROUP,NGAS),  &
+          cstate%f_gro1k(NZ,NBIN,NGROUP,NGAS),  &
+          cstate%f_ikey(NZ,NGROUP),  &
+          cstate%f_gro2(NZ,NGROUP),  &
+          cstate%f_scrit(NZ,NBIN,NGROUP), &
           !cstate%f_agnuc(NZ,NGAS), &
           !cstate%f_deltafg(NZ,NGAS), &
           !cstate%f_fluxmol(NZ,NGAS), &
@@ -840,6 +850,13 @@ contains
         endif
         
         cstate%f_radint(:,:) = 0._f
+
+        ! Each condensate starts every step keyed to the gas of its growth pathway.
+        cstate%f_grok(:,:,:,:)  = 0._f
+        cstate%f_gro1k(:,:,:,:) = 0._f
+        do igroup = 1, NGROUP
+          cstate%f_ikey(:,igroup) = cstate%f_carma%f_igrowgas(cstate%f_carma%f_group(igroup)%f_ienconc)
+        end do
       end if
       
       if (cstate%f_carma%f_do_coag) then
@@ -1007,6 +1024,9 @@ contains
           cstate%f_ft, &
           cstate%f_gro, &
           cstate%f_gro1, &
+          cstate%f_grok, &
+          cstate%f_gro1k, &
+          cstate%f_ikey, &
           cstate%f_gro2, &
           cstate%f_scrit, &
           !cstate%f_agnuc, &
@@ -1146,10 +1166,11 @@ contains
     if (present(cldfrc)) cstate%f_cldfrc(:) = cldfrc(:)
     if (present(rhcrit)) cstate%f_rhcrit(:) = rhcrit(:)
 
-    ! Determine the gas supersaturations.
+    ! Determine the condensate supersaturations (per group; groups may
+    ! share a gas reservoir).
     do iz = 1, cstate%f_NZ
-      do igas = 1, cstate%f_carma%f_NGAS
-        call supersat(cstate%f_carma, cstate, iz, igas, rc)
+      do igroup = 1, cstate%f_carma%f_NGROUP
+        call supersat(cstate%f_carma, cstate, iz, igroup, rc)
         if (rc < 0) return
       end do
     end do
@@ -1612,16 +1633,11 @@ contains
   !! @see CARMA_Step 
   !! @see CARMASTATE_SetGas
   !subroutine CARMASTATE_GetGas(cstate, igas, mmr, rc, satice, satliq, eqice, eqliq, wtpct)
-  subroutine CARMASTATE_GetGas(cstate, igas, mmr, rc, satice, satliq, eqice, eqliq, wtpct, gflux, winds, ekz)                   !PETER
-  !subroutine CARMASTATE_GetGas(cstate, igas, mmr, rc, satice, satliq, eqice, eqliq, wtpct, gflux)                   !PETER
+  subroutine CARMASTATE_GetGas(cstate, igas, mmr, rc, wtpct, gflux, winds, ekz)                   !PETER
     type(carmastate_type), intent(in)     :: cstate            !! the carma state object
     integer, intent(in)                   :: igas              !! the gas index
     real(kind=f), intent(out)             :: mmr(cstate%f_NZ)    !! the gas mass mixing ratio [kg/kg]
     integer, intent(out)                  :: rc                !! return code, negative indicates failure
-    real(kind=f), optional, intent(out)   :: satice(cstate%f_NZ) !! the gas saturation wrt ice
-    real(kind=f), optional, intent(out)   :: satliq(cstate%f_NZ) !! the gas saturation wrt liquid
-    real(kind=f), optional, intent(out)   :: eqice(cstate%f_NZ)  !! the gas vapor pressure wrt ice
-    real(kind=f), optional, intent(out)   :: eqliq(cstate%f_NZ)  !! the gas vapor pressure wrt liquid
     real(kind=f), optional, intent(out)   :: wtpct(cstate%f_NZ)  !! weight percent aerosol composition
     real(kind=f), optional, intent(out)   :: gflux(cstate%f_NZP1)  !! PETER: Upward flux of gas in g/cm^2/s
     real(kind=f), optional, intent(out)   :: winds(cstate%f_NZ)  !! PETER: Upward wind velocity in cm/s
@@ -1637,22 +1653,52 @@ contains
       rc = RC_ERROR
       return
     end if
-    
+
     ! Use the specified mass mixing ratio and the air density to determine the mass
     ! of the gas in g/x/y/z.
     mmr(:) = cstate%f_gc(:, igas) / cstate%f_rhoa_wet(:)
 
-    if (present(satice)) satice(:) = cstate%f_supsati(:, igas) + 1._f
-    if (present(satliq)) satliq(:) = cstate%f_supsatl(:, igas) + 1._f
-    if (present(eqice))  eqice(:)  = cstate%f_pvapi(:, igas) / cstate%f_p(:)
-    if (present(eqliq))  eqliq(:)  = cstate%f_pvapl(:, igas) / cstate%f_p(:)
     if (present(wtpct))  wtpct(:)  = cstate%f_wtpct(:)
     if (present(gflux))  gflux(:)  = cstate%f_gflux(:, igas)                            !PETER
     if (present(winds))  winds(:)  = cstate%f_winds(:)                            !PETER
     if (present(ekz))    ekz(:)    = cstate%f_ekz(:) / cstate%f_zmetl(:)**2                               !PETER !DPOW
-    
+
     return
   end subroutine CARMASTATE_GetGas
+
+
+  !! Gets the per-condensate saturation state.  The saturation and equilibrium
+  !! vapor pressure are properties of a condensate (group), not of a gas:
+  !! several groups may share one gas reservoir yet have different vapor
+  !! pressures.
+  !!
+  !! @see CARMASTATE_GetGas
+  subroutine CARMASTATE_GetGroup(cstate, igroup, rc, satice, satliq, eqice, eqliq)
+    type(carmastate_type), intent(in)     :: cstate            !! the carma state object
+    integer, intent(in)                   :: igroup            !! the group index
+    integer, intent(out)                  :: rc                !! return code, negative indicates failure
+    real(kind=f), optional, intent(out)   :: satice(cstate%f_NZ) !! the condensate saturation wrt ice
+    real(kind=f), optional, intent(out)   :: satliq(cstate%f_NZ) !! the condensate saturation wrt liquid
+    real(kind=f), optional, intent(out)   :: eqice(cstate%f_NZ)  !! the equilibrium vapor pressure wrt ice / total pressure
+    real(kind=f), optional, intent(out)   :: eqliq(cstate%f_NZ)  !! the equilibrium vapor pressure wrt liquid / total pressure
+
+    ! Assume success.
+    rc = RC_OK
+
+    if (igroup > cstate%f_carma%f_NGROUP) then
+      if (cstate%f_carma%f_do_print) write(cstate%f_carma%f_LUNOPRT, *) "CARMASTATE_GetGroup:: ERROR - The specifed group (", &
+        igroup, ") is larger than the number of groups (", cstate%f_carma%f_NGROUP, ")."
+      rc = RC_ERROR
+      return
+    end if
+
+    if (present(satice)) satice(:) = cstate%f_supsati(:, igroup) + 1._f
+    if (present(satliq)) satliq(:) = cstate%f_supsatl(:, igroup) + 1._f
+    if (present(eqice))  eqice(:)  = cstate%f_pvapi(:, igroup) / cstate%f_p(:)
+    if (present(eqliq))  eqliq(:)  = cstate%f_pvapl(:, igroup) / cstate%f_p(:)
+
+    return
+  end subroutine CARMASTATE_GetGroup
   
 
   !! Gets information about the state of the atmosphere. After the CARMA_Step() call,
@@ -1827,19 +1873,13 @@ contains
   !! @see CARMA_GetGas
   !! @see CARMA_InitializeStep 
   !! @see CARMA_Step 
-  subroutine CARMASTATE_SetGas(cstate, igas, mmr, rc, mmr_old, satice_old, satliq_old)
+  subroutine CARMASTATE_SetGas(cstate, igas, mmr, rc, mmr_old)
     type(carmastate_type), intent(inout)  :: cstate         !! the carma object
     integer, intent(in)                   :: igas           !! the gas index
     real(kind=f), intent(in)              :: mmr(cstate%f_NZ) !! the gas mass mixing ratio [kg/kg]
     integer, intent(out)                  :: rc             !! return code, negative indicates failure
     real(kind=f), intent(in), optional    :: mmr_old(cstate%f_NZ) !! the previous gas mass mixing ratio [kg/kg]
-    real(kind=f), intent(inout), optional :: satice_old(cstate%f_NZ) !! the previous gas saturation wrt ice, calculates if -1
-    real(kind=f), intent(inout), optional :: satliq_old(cstate%f_NZ) !! the previous gas saturation wrt liquid, calculates if -1
-    
-    real(kind=f)                          :: tnew(cstate%f_NZ)
-    integer                               :: iz
-    logical                               :: calculateOld
-    
+
     ! Assume success.
     rc = RC_OK
 
@@ -1850,82 +1890,134 @@ contains
       rc = RC_ERROR
       return
     end if
-    
+
     if (cstate%f_carma%f_do_substep) then
       if (.not. present(mmr_old)) then
         if (cstate%f_carma%f_do_print) write(cstate%f_carma%f_LUNOPRT,*) &
-	"CARMASTATE_SetGas: Error - Need to specify mmr_old, satic_old, satliq_old when substepping."
+	"CARMASTATE_SetGas: Error - Need to specify mmr_old when substepping."
         rc = RC_ERROR
-        
         return
-        
       else
         cstate%f_gcl(:, igas) = mmr_old(:) * cstate%f_rhoa_wet(:) * cstate%f_t(:) / cstate%f_told(:)
-      
-        ! A value of -1 for the saturation ratio means that it needs to be calculated from the old temperature
-        ! and the old gc.
-        !
-        ! NOTE: This is typically just a problem for the first step, so we just need to get close.
-        calculateOld = .false.
-        if (present(satice_old) .and. present(satliq_old)) then
-          if (any(satice_old(:) == -1._f) .or. any(satliq_old(:) == -1._f)) calculateOld = .true.
-        else 
-          calculateOld = .true.
-        end if
-        
-        if (calculateOld) then
-          
-          ! This is a bit of a hack, because of the way CARMA has the vapor pressure and saturation
-          ! routines implemented.
-          
-          ! Temporarily set the temperature and gc of to the old state
-          
-          tnew(:)      = cstate%f_t(:)
-          cstate%f_t(:)  = cstate%f_told(:)
-       
-          cstate%f_gc(:, igas) = mmr_old(:) * cstate%f_rhoa_wet(:)
-          
-          do iz = 1, cstate%f_NZ
-            call supersat(cstate%f_carma, cstate, iz, igas, rc)
-            if (rc < RC_OK) return
-          
-            if (present(satice_old)) then
-              if (satice_old(iz) == -1._f) then
-                cstate%f_supsatiold(iz, igas) = cstate%f_supsati(iz, igas)
-              else
-                cstate%f_supsatiold(iz, igas) = satice_old(iz) - 1._f
-              endif
-            else
-              cstate%f_supsatiold(iz, igas) = cstate%f_supsati(iz, igas)
-            end if
-            
-            if (present(satliq_old)) then
-              if (satliq_old(iz) == -1._f) then
-                cstate%f_supsatlold(iz, igas) = cstate%f_supsatl(iz, igas)
-              else
-                cstate%f_supsatlold(iz, igas) = satliq_old(iz) - 1._f
-              endif
-            else
-              cstate%f_supsatlold(iz, igas) = cstate%f_supsatl(iz, igas)
-            end if
-          end do
-          
-          cstate%f_t(:) = tnew(:)
-        
-        else
-          cstate%f_supsatiold(:, igas) = satice_old(:) - 1._f
-          cstate%f_supsatlold(:, igas) = satliq_old(:) - 1._f
-        end if
       end if
     end if
 
     ! Use the specified mass mixing ratio and the air density to determine the mass
     ! of the gas in g/x/y/z.
+    !
+    ! NOTE: When substepping, the old per-condensate saturations must also be
+    ! initialized; use CARMASTATE_PrepareStep, which handles all gases and
+    ! groups together, instead of calling this routine gas by gas.
     cstate%f_gc(:, igas)  = mmr(:) * cstate%f_rhoa_wet(:)
-    !cstate%f_gc(:, igas)  = mmr(:) * cstate%f_rhoa(:)
-    
+
     return
   end subroutine CARMASTATE_SetGas
+
+
+  !! Loads the gas concentrations for all gases and initializes the old
+  !! per-condensate (group) saturations for substepping.  This replaces
+  !! per-gas CARMASTATE_SetGas calls: with several condensates sharing one
+  !! gas reservoir the old saturations are per group, not per gas, so they
+  !! can only be initialized once all gas concentrations are known.
+  !!
+  !! @see CARMASTATE_SetGas
+  subroutine CARMASTATE_PrepareStep(cstate, mmr, rc, mmr_old, satice_old, satliq_old)
+    type(carmastate_type), intent(inout)  :: cstate         !! the carma object
+    real(kind=f), intent(in)              :: mmr(cstate%f_NZ, cstate%f_carma%f_NGAS) !! the gas mass mixing ratios [kg/kg]
+    integer, intent(out)                  :: rc             !! return code, negative indicates failure
+    real(kind=f), intent(in), optional    :: mmr_old(cstate%f_NZ, cstate%f_carma%f_NGAS) !! the previous gas mass mixing ratios [kg/kg]
+    real(kind=f), intent(inout), optional :: satice_old(cstate%f_NZ, cstate%f_carma%f_NGROUP) !! the previous condensate saturation wrt ice, calculated if -1
+    real(kind=f), intent(inout), optional :: satliq_old(cstate%f_NZ, cstate%f_carma%f_NGROUP) !! the previous condensate saturation wrt liquid, calculated if -1
+
+    real(kind=f)                          :: tnew(cstate%f_NZ)
+    integer                               :: iz, igas, igroup
+    logical                               :: calculateOld
+
+    ! Assume success.
+    rc = RC_OK
+
+    if (cstate%f_carma%f_do_substep) then
+      if (.not. present(mmr_old)) then
+        if (cstate%f_carma%f_do_print) write(cstate%f_carma%f_LUNOPRT,*) &
+	"CARMASTATE_PrepareStep: Error - Need to specify mmr_old when substepping."
+        rc = RC_ERROR
+        return
+      end if
+
+      do igas = 1, cstate%f_carma%f_NGAS
+        cstate%f_gcl(:, igas) = mmr_old(:, igas) * cstate%f_rhoa_wet(:) * cstate%f_t(:) / cstate%f_told(:)
+      end do
+
+      ! A value of -1 for a saturation ratio means that it needs to be
+      ! calculated from the old temperature and the old gc.
+      !
+      ! NOTE: This is typically just a problem for the first step, so we just
+      ! need to get close.
+      calculateOld = .false.
+      if (present(satice_old) .and. present(satliq_old)) then
+        if (any(satice_old(:,:) == -1._f) .or. any(satliq_old(:,:) == -1._f)) calculateOld = .true.
+      else
+        calculateOld = .true.
+      end if
+
+      if (calculateOld) then
+
+        ! This is a bit of a hack, because of the way CARMA has the vapor
+        ! pressure and saturation routines implemented.
+        !
+        ! Temporarily set the temperature and gc to the old state.
+        tnew(:)       = cstate%f_t(:)
+        cstate%f_t(:) = cstate%f_told(:)
+
+        do igas = 1, cstate%f_carma%f_NGAS
+          cstate%f_gc(:, igas) = mmr_old(:, igas) * cstate%f_rhoa_wet(:)
+        end do
+
+        do igroup = 1, cstate%f_carma%f_NGROUP
+          do iz = 1, cstate%f_NZ
+            call supersat(cstate%f_carma, cstate, iz, igroup, rc)
+            if (rc < RC_OK) return
+
+            if (present(satice_old)) then
+              if (satice_old(iz, igroup) == -1._f) then
+                cstate%f_supsatiold(iz, igroup) = cstate%f_supsati(iz, igroup)
+              else
+                cstate%f_supsatiold(iz, igroup) = satice_old(iz, igroup) - 1._f
+              endif
+            else
+              cstate%f_supsatiold(iz, igroup) = cstate%f_supsati(iz, igroup)
+            end if
+
+            if (present(satliq_old)) then
+              if (satliq_old(iz, igroup) == -1._f) then
+                cstate%f_supsatlold(iz, igroup) = cstate%f_supsatl(iz, igroup)
+              else
+                cstate%f_supsatlold(iz, igroup) = satliq_old(iz, igroup) - 1._f
+              endif
+            else
+              cstate%f_supsatlold(iz, igroup) = cstate%f_supsatl(iz, igroup)
+            end if
+          end do
+        end do
+
+        cstate%f_t(:) = tnew(:)
+
+      else
+        do igroup = 1, cstate%f_carma%f_NGROUP
+          cstate%f_supsatiold(:, igroup) = satice_old(:, igroup) - 1._f
+          cstate%f_supsatlold(:, igroup) = satliq_old(:, igroup) - 1._f
+        end do
+      end if
+    end if
+
+    ! Use the specified mass mixing ratios and the air density to determine
+    ! the mass of each gas in g/x/y/z.
+    do igas = 1, cstate%f_carma%f_NGAS
+      cstate%f_gc(:, igas)  = mmr(:, igas) * cstate%f_rhoa_wet(:)
+    end do
+
+    return
+  end subroutine CARMASTATE_PrepareStep
   
   
   !! Sets information about the state of the atmosphere.

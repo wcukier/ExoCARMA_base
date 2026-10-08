@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -6,7 +8,8 @@
 !!
 !! @author Andy Ackerman, Bill McKie, Chuck Bardeen
 !! @version Dec-1995, Sep-1997, Nov-2009
-subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in, nretries_in)
+subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlheat, rc, dtime_in, nretries_in, dt_suggest, &
+                  gc_base, gas_check)
 
   ! types
   use carma_precision_mod
@@ -23,21 +26,33 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in
   type(carma_type), intent(in)         :: carma   !! the carma object
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
-  real(kind=f), intent(in)             :: previous_ice(NGAS)      !! total ice at the start of substep
-  real(kind=f), intent(in)             :: previous_liquid(NGAS)   !! total liquid at the start of substep
+  real(kind=f), intent(in)             :: previous_ice(NGAS)      !! total ice at the start of substep [g gas equivalent]
+  real(kind=f), intent(in)             :: previous_liquid(NGAS)   !! total liquid at the start of substep [g gas equivalent]
+  real(kind=f), intent(in)             :: previous_rlheat         !! latent heat of condensate at the start of substep [erg]
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
   real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
   real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
+  real(kind=f), intent(inout)          :: dt_suggest  !! substep size the failing rates could tolerate [s];
+                                                      !! only ever reduced, and only meaningful when a
+                                                      !! RC_WARNING_RETRY is issued
+  real(kind=f), intent(in)             :: gc_base(NGAS) !! gas at the start of the substep [g/x/y/z]; the condensate
+                                                        !! change is applied to this, not to the gc the rates saw
+  integer, intent(in)                  :: gas_check   !! 0 = no positivity/threshold checks, 1 = checks that request a
+                                                      !! retry but never clamp, 2 = checks with the clamp at maxretries
 
   ! Local Variables
   integer                              :: igas    !! gas index
+  integer                              :: jgroup  !! a group condensing this gas (diagnostics)
+  integer                              :: ig
   real(kind=f)                         :: gc_cgs
   real(kind=f)                         :: gc_old
   real(kind=f)                         :: rvap
-  real(kind=f)                         :: stofact
-  real(kind=f)                         :: total_ice(NGAS)      ! total ice
-  real(kind=f)                         :: total_liquid(NGAS)   ! total liquid
+  real(kind=f)                         :: total_ice(NGAS)      ! total ice [g gas equivalent]
+  real(kind=f)                         :: total_liquid(NGAS)   ! total liquid [g gas equivalent]
+  real(kind=f)                         :: total_rlheat         ! latent heat of condensate [erg]
   real(kind=f)                         :: gc_threshold         ! threshold for changes to gc
+  real(kind=f)                         :: net_prod             ! net gas production rate [g/cm3/s]
+  real(kind=f), parameter              :: DT_SAFETY = 0.5_f    ! margin on rate-informed substep suggestions
   
   
   1 format(/,'gsolve::ERROR - negtive gas concentration for ',a,' : iz=',i4,',lat=', &
@@ -52,11 +67,16 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in
               ',supsatl=',e10.3,',t=',f6.2, ', setting gc to 1e-50*rhoa(iz)')
   
 
-  ! Determine the total amount of condensate for each gas.
-  call totalcondensate(carma, cstate, iz, total_ice, total_liquid, rc)
-  
+  ! Determine the total amount of condensate for each gas.  Totals are in
+  ! gas-mass-equivalent units (the per-group stoichiometric conversion is
+  ! applied in totalcondensate), so the gas budget below needs no further
+  ! stoichiometry.
+  call totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlheat, rc)
+
+  ! Latent heating from the net change in condensate across all groups.
+  rlprod(iz) = rlprod(iz) - (previous_rlheat - total_rlheat) / (CP * rhoa(iz) * dtime_in)
+
   do igas = 1,NGAS
-    stofact = carma%f_gas(igas)%f_wtmol_dif/carma%f_gas(igas)%f_wtmol * carma%f_gas(igas)%f_stofact !WC
 
     ! We do not seem to be conserving mass and energy, so rather than relying upon gasprod
     ! and rlheat, recalculate the total change in condensate to determine the change
@@ -66,20 +86,25 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in
     ! gas and latent heat were solved for explicitly using the same rates.
     gasprod(igas,iz) = ((previous_ice(igas) - total_ice(igas)) + &
 		                  (previous_liquid(igas) - total_liquid(igas))) / dtime_in
-    rlprod(iz)    = rlprod(iz) - ((previous_ice(igas) - total_ice(igas)) * &
-		                  (rlhe(iz,igas) + rlhm(iz,igas)) + &
-                      (previous_liquid(igas) - total_liquid(igas)) * &
-		                  (rlhe(iz,igas))) / (CP * rhoa(iz) * dtime_in)
 
-    gc_old = gc(iz,igas)
+    gc_old = gc_base(igas)
+
+    gc(iz,igas) = gc_base(igas) + dtime_in * (gasprod(igas,iz) + phochemprod_gas(iz,igas))
+
+    if (gas_check == 0) cycle
 
     ! Don't let the gas concentration go negative.
-    gc(iz,igas) = gc(iz,igas) + dtime_in * (gasprod(igas,iz)*stofact + phochemprod_gas(iz,igas))
-    
-
     if (gc(iz,igas) < 0.0_f) then
+#ifdef CARMA_TEST_CHECKS
+      ! Test-build diagnostic: failing gas, attempt, substep, the gas on hand, its
+      ! net production, whether this attempt clamps, and every condensate's
+      ! supersaturation at the start of the substep.
+      write(91,'(a,2i4,f6.0,4es15.6e3,i2,*(es13.4e3))') 'F', iz, igas, nretries_in, dtime_in, gc_old, &
+        gasprod(igas,iz), phochemprod_gas(iz,igas), merge(1, 0, nretries_in == maxretries .and. gas_check == 2), &
+        (supsatl(iz,ig), ig = 1, NGROUP)
+#endif
       if (do_substep) then
-        if (nretries_in == maxretries) then 
+        if (nretries_in == maxretries .and. gas_check == 2) then 
           !if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
           !      lat, lon, gc(iz,igas), gasprod(igas), &
           !      supsati(iz,igas), supsatl(iz,igas), t(iz)
@@ -91,12 +116,26 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in
           gc(iz,igas) = 1e-50_f * rhoa(iz)
           rc=RC_WARNING
         else
+          ! Suggest the substep the depletion rate could tolerate: the time to
+          ! consume the gas on hand, with margin.
+          net_prod = abs(gasprod(igas,iz) + phochemprod_gas(iz,igas))
+          if (net_prod > 0._f .and. gc_old > 0._f) then
+            dt_suggest = min(dt_suggest, DT_SAFETY * gc_old / net_prod)
+          end if
           rc = RC_WARNING_RETRY
         endif
       else
-        if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
+        ! Report the saturation of the first condensate keyed to this gas.
+        jgroup = 0
+        do ig = 1, NGROUP
+          if (igrowgas(ienconc(ig)) == igas) then
+            jgroup = ig
+            exit
+          end if
+        end do
+        if (do_print .and. jgroup > 0) write(LUNOPRT,1) trim(gasname(igas)), iz, &
                 lat, lon, gc(iz,igas), gasprod(igas,iz), &
-                supsati(iz, igas), supsatl(iz,igas), t(iz)
+                supsati(iz, jgroup), supsatl(iz,jgroup), t(iz)
         rc = RC_WARNING_RETRY
       end if
     end if
@@ -114,14 +153,28 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in
           if (nretries_in == maxretries) then
             if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &
               lat, lon, dtime_in * gasprod(igas,iz) / gc(iz,igas)
-            if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,igas), &
-              supsatlold(iz,igas), told(iz), d_gc(iz,igas), d_t(iz)
+            jgroup = 0
+            do ig = 1, NGROUP
+              if (igrowgas(ienconc(ig)) == igas) then
+                jgroup = ig
+                exit
+              end if
+            end do
+            if (do_print .and. jgroup > 0) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz,jgroup), &
+              supsatlold(iz,jgroup), told(iz), d_gc(iz,igas), d_t(iz)
           end if
         else
           if (do_print) write(LUNOPRT,3) trim(gasname(igas)), iz, &
 		        lat, lon, dtime_in * gasprod(igas,iz) / gc(iz,igas)
         end if
-  
+
+        ! Suggest the substep that would keep the relative change at the
+        ! threshold, with margin.
+        if (abs(gasprod(igas,iz)) > 0._f .and. gc(iz,igas) > 0._f) then
+          dt_suggest = min(dt_suggest, &
+                           DT_SAFETY * gc_threshold * gc(iz,igas) / abs(gasprod(igas,iz)))
+        end if
+
         rc = RC_WARNING_RETRY
       end if
     end if

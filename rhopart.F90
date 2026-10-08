@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -46,6 +48,7 @@ subroutine rhopart(carma, cstate, rc)
   real(kind=f)    :: vcore(NBIN)
   real(kind=f)    :: mcore(NBIN)
   real(kind=f)    :: r_ratio
+  real(kind=f)    :: pvap_h2o_liq, pvap_h2o_ice
   real(kind=f)    :: gc_cgs
 
   1 format(/,'rhopart::WARNING - core mass > total mass, truncating : iz=',i4,',igroup=',&
@@ -127,7 +130,10 @@ subroutine rhopart(carma, cstate, rc)
       ! Determine the weight percent of sulfate, and store it for later use.
       if (irhswell(igroup) == I_WTPCT_H2SO4) then
         gc_cgs     = gc(iz, igash2so4) / (xmet(iz) * ymet(iz) * zmet(iz))
-        wtpct(iz)  = wtpct_tabaz(carma, t(iz), gc_cgs, pvapl(iz, igash2o), rc)
+        ! Water vapor pressure computed directly (vapor pressures are stored
+        ! per condensate group, and a water group need not exist here).
+        call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
+        wtpct(iz)  = wtpct_tabaz(carma, t(iz), gc_cgs, pvap_h2o_liq, rc)
         if (rc < 0) return
       end if
           

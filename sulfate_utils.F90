@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -80,7 +82,7 @@ contains
     real(kind=f)     :: activ 
          
     ! Get number density of water (/cm3) from mass concentration (g/cm3)
-    h2o_num=h2o_mass*AVG/gwtmol(1)
+    h2o_num=h2o_mass*AVG/gwtmol_dif(1)
 
     !  Get partial pressure of water (dynes/cm2) from concentration (/cm3)
     ! Ideal gas law: P=nkT

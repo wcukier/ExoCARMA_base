@@ -15,7 +15,7 @@ carmastate_mod.o carma_mod.o coagl.o coagp.o csolve.o setupbins.o \
 setupatm.o setupvf.o microslow.o newstate.o prestep.o setupckern.o \
 setupcoag.o smallconc.o step.o supersat.o vaporp.o vertadv.o \
 vertdif.o vertical.o versol.o rhopart.o psolve.o zeromicro.o \
-nsubsteps.o setupgrow.o setupgkern.o setupnuc.o growevapl.o microfast.o \
+nsubsteps.o setupgrow.o setupgkern.o setupnuc.o growevapl.o microfast.o microfast_implicit.o \
 gsolve.o actdropl.o growp.o downgxfer.o \
 upgxfer.o downgevapply.o evapp.o evap_poly.o evap_mono.o \
 evap_ingrp.o tsolve.o miess.o vaporp_h2o_buck1981.o wetr.o \
@@ -215,6 +215,9 @@ maxconc.o : maxconc.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_t
 #	$(FORTRAN) $(FFLAGS) -c $<
 
 microfast.o : microfast.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	
+	$(FORTRAN) $(FFLAGS) -c $<
+
+microfast_implicit.o : microfast_implicit.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	
 	$(FORTRAN) $(FFLAGS) -c $<
 
 microslow.o : microslow.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	

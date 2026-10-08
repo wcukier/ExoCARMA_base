@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 !! This module defines types used in the CARMA module. The types need to be defined here
 !! to avoid circular references between different modules (e.g. carma_mod and
 !! carmastate_mod).
@@ -79,31 +81,18 @@ module carma_types_mod
   
     !   name          Name of the gas
     !   shortname     Short name of the gas
-    !   wtmol         Molecular weight for the gas [g/mol]
-    !   ivaprtn       vapor pressure routine for the gas
+    !   wtmol_dif     Molecular weight of the diffusing gas [g/mol]
     !   dgc_threshold convergence criteria for gas concentration [fraction]
     !   ds_threshold  convergence criteria for gas saturation [fraction]
     !
+    ! Condensate properties (vapor pressure, surface tension, ...) live on
+    ! the group, so several condensates can share one gas reservoir.
     character(len=CARMA_NAME_LEN)               :: f_name
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
-    real(kind=f)                                :: f_wtmol
     real(kind=f)                                :: f_wtmol_dif
-    integer                                     :: f_ivaprtn
     integer                                     :: f_icomposition
     real(kind=f)                                :: f_dgc_threshold
     real(kind=f)                                :: f_ds_threshold
-    real(kind=f)                                :: f_rho_cond      ! WC
-    real(kind=f)                                :: f_surften_0     ! WC
-    real(kind=f)                                :: f_surften_slope ! WC
-    real(kind=f)                                :: f_coldia        ! WC
-    real(kind=f)                                :: f_lat_heat_e    ! WC
-    real(kind=f)                                :: f_desorption    ! WC: user-specified desorption energy [eV], -1 = auto
-    integer                                     :: f_is_type3      ! WC
-    real(kind=f)                                :: f_vp_offset     ! WC
-    real(kind=f)                                :: f_vp_tcoeff     ! WC
-    real(kind=f)                                :: f_vp_metcoeff   ! WC
-    real(kind=f)                                :: f_vp_logpcoeff  ! WC
-    integer                                     :: f_stofact       ! WC
   end type carmagas_type
 
 
@@ -216,6 +205,31 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_arat       ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rrat       ! (NBIN)
     real(kind=f)                                :: f_dpc_threshold
+    ! Condensate properties of the volatile element in this group.  These
+    ! live on the group (not the gas) so several condensates can share one
+    ! gas reservoir.
+    !   wtmol       Molecular weight of the condensate [g/mol]
+    !   wtmol_core  Molecular weight of the core condensate [g/mol]
+    !   ivaprtn     vapor pressure routine for the condensate
+    !   desorption  user-specified desorption energy [eV], -1 = auto
+    !   gstick      growth sticking coefficient of this group; <= 0 (default -1)
+    !               uses the global gstickl / gsticki
+    real(kind=f)                                :: f_wtmol         ! WC
+    real(kind=f)                                :: f_wtmol_core    ! WC
+    integer                                     :: f_ivaprtn       ! WC
+    real(kind=f)                                :: f_rho_cond      ! WC
+    real(kind=f)                                :: f_surften_0     ! WC
+    real(kind=f)                                :: f_surften_slope ! WC
+    real(kind=f)                                :: f_coldia        ! WC
+    real(kind=f)                                :: f_lat_heat_e    ! WC
+    real(kind=f)                                :: f_desorption    ! WC
+    integer                                     :: f_is_type3      ! WC
+    real(kind=f)                                :: f_vp_offset     ! WC
+    real(kind=f)                                :: f_vp_tcoeff     ! WC
+    real(kind=f)                                :: f_vp_metcoeff   ! WC
+    real(kind=f)                                :: f_vp_logpcoeff  ! WC
+    integer                                     :: f_stofact       ! WC
+    real(kind=f)                                :: f_gstick
   end type carmagroup_type
   
   
@@ -373,6 +387,7 @@ module carma_types_mod
     !   maxsubsteps Maximum number of time substeps allowed
     !   minsubsteps Maximum number of time substeps allowed
     !   maxretries  Maximum number of substepping retries allowed
+    !   maxntsubsteps_cap  Hard cap on the substep count a retry may request
     !   igash2o     gas index for H2O
     !   igash2so4   gas index for H2SO4
     !   igasso2     gas index for SO2
@@ -396,6 +411,7 @@ module carma_types_mod
     logical                                       :: f_do_print_init
     logical                                       :: f_do_step
     logical                                       :: f_do_substep
+    logical                                       :: f_do_cons_evap    !! .true. to scale explicit evaporation production by 1/(1+evaplg*dt) so a bin cannot receive more mass than its donor's implicit loss surrenders (prevents runaway amplification of the evaporation cascade where evaplg*dt >> 1)
     logical                                       :: f_do_t_evolves    !! .true. if temperature evolves between steps (e.g. radiative coupling). When .false., setupgkern caches its outputs after the first call.
     logical                                       :: f_do_thermo
     logical                                       :: f_do_cnst_rlh
@@ -418,7 +434,14 @@ module carma_types_mod
     integer                                       :: f_igasso2
     integer                                       :: f_maxsubsteps 
     integer                                       :: f_minsubsteps 
-    integer                                       :: f_maxretries 
+    integer                                       :: f_maxretries
+    integer                                       :: f_maxntsubsteps_cap
+    logical                                       :: f_do_implicit_gas    ! solve gas depletion implicitly with the particles
+    real(kind=f)                                  :: f_implicit_trigger   ! relative gas change above which the implicit solve runs
+    real(kind=f)                                  :: f_implicit_rtol      ! relative tolerance on the implicit gas fixed point
+    integer                                       :: f_implicit_maxit     ! Newton iteration cap for the implicit gas solve
+    real(kind=f)                                  :: f_implicit_dgmax     ! largest relative gas change an implicit substep may take
+    logical                                       :: f_do_key_swap        ! let condensates swap their key reactant to the limiting one
     integer                                       :: f_ifall
     integer                                       :: f_icoagop
     integer                                       :: f_icollec
@@ -427,7 +450,18 @@ module carma_types_mod
     integer                                       :: f_itbnd_gc
     integer                                       :: f_ibbnd_gc
     integer, allocatable, dimension(:,:)          :: f_inucgas      ! (NELEM, NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NGAS,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NELEM, NELEM): (seed elem, target elem)
+    ! Many-to-many gas depletion: each group may deplete several gases.
+    !   nu_dep       stoichiometric coefficient of gas in the group's condensation reaction
+    !   dgas_dcond   g of gas consumed per g of condensate formed {CARMA_InitializeGrowth}
+    !   ndepgas      number of gases the group depletes
+    !   idepgas      compressed indices of the depleted gases
+    integer, allocatable, dimension(:,:)          :: f_nu_dep       ! (NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:)     :: f_dgas_dcond   ! (NGROUP,NGAS)
+    integer, allocatable, dimension(:)            :: f_ndepgas      ! (NGROUP)
+    integer, allocatable, dimension(:,:)          :: f_idepgas      ! (NGAS,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)     :: f_xref         ! (NGROUP,NGAS) reference mass mixing ratio of each
+                                                                    ! secondary reactant in the condensate's vapor-pressure fit
     integer, allocatable, dimension(:)            :: f_igrowgas     ! NELEM
     integer, allocatable, dimension(:)            :: f_nnuc2elem    ! NELEM
     integer, allocatable, dimension(:)            :: f_ievp2elem    ! NELEM
@@ -832,7 +866,7 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_pl         ! (NZP1)
     real(kind=f), allocatable, dimension(:)     :: f_rmu        ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_thcond     ! (NZ)
-    real(kind=f), allocatable, dimension(:,:,:,:) :: f_thcondnc   ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:) :: f_thcondnc   ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:)     :: f_told       ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_relhum     ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_wtpct      ! (NZ)
@@ -880,27 +914,33 @@ module carma_types_mod
     !   dtpart    Delta particle temperature [K]
     !   phprod    Particle heating production (substep) [K/s]
     !
+    ! Thermodynamic state of each condensate is per GROUP (several groups may
+    ! share one gas reservoir); diffus is a property of the gas in air and
+    ! stays per gas.
     real(kind=f), allocatable, dimension(:,:)    :: f_diffus     ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_rlhe       ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_rlhm       ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_pvapl      ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_pvapi      ! (NZ,NGAS)
+    real(kind=f), allocatable, dimension(:,:)    :: f_rlhe       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_rlhm       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_pvapl      ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_pvapi      ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:)      :: f_surfctwa   ! (NZ)
     real(kind=f), allocatable, dimension(:)      :: f_surfctiw   ! (NZ)
     real(kind=f), allocatable, dimension(:)      :: f_surfctia   ! (NZ)
-    real(kind=f), allocatable, dimension(:,:)    :: f_akelvin    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_akelvini   ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_surfacetens   ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:)    :: f_desorption   ! (NGAS)
-    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:)    :: f_gro2       ! (NZ,NGROUP,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatlold ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:)    :: f_supsatiold ! (NZ,NGAS)
-    real(kind=f), allocatable, dimension(:,:,:,:)  :: f_scrit      ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:)    :: f_akelvin    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_akelvini   ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_surfacetens   ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:)    :: f_desorption   ! (NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_grok      ! (NZ,NBIN,NGROUP,NGAS) growth kernel with gas as key
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_gro1k     ! (NZ,NBIN,NGROUP,NGAS) conduction term with gas as key
+    integer, allocatable, dimension(:,:)          :: f_ikey      ! (NZ,NGROUP) active key reactant of each condensate
+    real(kind=f), allocatable, dimension(:,:)    :: f_gro2       ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatlold ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:)    :: f_supsatiold ! (NZ,NGROUP)
+    real(kind=f), allocatable, dimension(:,:,:)  :: f_scrit      ! (NZ,NBIN,NGROUP)
 !    real(kind=f), allocatable, dimension(:,:)  :: f_agnuc      ! (NZ,NGAS)
 !    real(kind=f), allocatable, dimension(:,:)  :: f_deltafg      ! (NZ,NGAS)
 !    real(kind=f), allocatable, dimension(:,:)  :: f_fluxmol      ! (NZ,NGAS)

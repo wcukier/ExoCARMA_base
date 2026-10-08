@@ -295,6 +295,18 @@ module carma_rce
     !! microphysical one, to reach equilibrium in a tractable number of
     !! steps. 1 keeps the two together, so the time history is physical.
     real(kind=f) :: accel   = 1._f
+    !! Heat-capacity divisor for the convective zone reaching the base. The
+    !! deep interior holds most of the column's heat capacity, so an interior
+    !! that starts off its equilibrium adiabat takes ~1e9 s to reach it. The
+    !! zone stops warming only when its net heating averages to zero, so the
+    !! equilibrium is unchanged; 1 keeps the time history physical.
+    !! LLM-GENERATED — UNVERIFIED (tier: physics)
+    real(kind=f) :: accel_deep = 1._f
+    !! How a convective zone's uniform damping factor is chosen: 0 = the
+    !! fastest layer's 1/(1 + dt/tau_rad); 1 = the zone's collective implicit
+    !! factor 1/(1 - dt*J_zone), J_zone = sum_{i,k in zone} C_i J_ik / sum C_i.
+    !! LLM-GENERATED — UNVERIFIED (tier: physics)
+    integer      :: zone_damp = 0
     real(kind=f) :: dt_max  = 0.5_f !! per-step |dT| clamp [K]
     real(kind=f) :: dt_tol  = 1._f  !! drift before re-solving [K]
     real(kind=f) :: dtau_tol = 0.02_f !! cloud cross-section change before re-solving
@@ -342,6 +354,23 @@ module carma_rce
     real(kind=f) :: dt_since_solve    = 0._f !! model time since last solve [s]
     real(kind=f) :: drift             = 0._f !! accumulated max|dT| since last solve [K]
     real(kind=f) :: xsec_ref         = -1._f !! cloud cross-section at last solve
+    !! Energy budget of the update since the start of the run [J/m^2]: the
+    !! heating the solves computed (sum of C*dtdt*dt, i.e. (F_base - F_TOA)*dt),
+    !! what was applied to t after damping, the implicit solve and the trust
+    !! region, the enthalpy change of the convective adjustment, and the extra
+    !! applied by accel_deep. Diagnostics only; nothing reads them.
+    !! LLM-GENERATED — UNVERIFIED (tier: physics)
+    real(kind=f) :: e_comp = 0._f
+    real(kind=f) :: e_appl = 0._f
+    real(kind=f) :: e_adj  = 0._f
+    real(kind=f) :: e_deep = 0._f
+    !! The same two budgets per layer [J/m^2].
+    real(kind=f), allocatable :: e_comp_z(:), e_appl_z(:)
+    !! The same two budgets split by whether the layer was stepped as
+    !! radiative (implicit solve, or its per-layer fallback) or as part of a
+    !! convective zone [J/m^2].
+    real(kind=f) :: e_appl_rad = 0._f, e_comp_rad = 0._f
+    real(kind=f) :: e_appl_cnv = 0._f, e_comp_cnv = 0._f
 
     ! ---- work arrays, allocated once --------------------------------------
     real(kind=f), allocatable :: beta(:,:)      !! (nwave, nz) gas attenuation [1/m]
@@ -1876,6 +1905,9 @@ contains
     real(kind=f) :: xsec, dt_eff, dt0, dt_lay
     real(kind=f) :: dt_col(rce%nz), rhs(rce%nz), sol(rce%nz), dt_cap
     real(kind=f) :: kzz_new(rce%nz+1), rescale_new
+    real(kind=f) :: heat_deep, capt_deep, x_deep
+    real(kind=f) :: hcap(rce%nz), e_pre, cz, jz
+    integer      :: k
     integer      :: rad_idx(rce%nz), nrad, i, j
     logical      :: dense_ok, do_jac
     logical      :: do_solve
@@ -2059,13 +2091,15 @@ contains
     ! the step to be a positive multiple of dtdt. The coupled step is not --
     ! the off-diagonals can give a layer a dT opposing its own dtdt, which is
     ! the whole point of them -- so there is no factor to take. The zone gets
-    ! the diagonal update instead, which is what it was validated with.
+    ! a diagonal update instead: one positive factor per zone, chosen by
+    ! zone_damp below.
     !
     ! The oscillation the implicit step exists to cure lives in the radiative
     ! upper atmosphere, where the layers are optically thin and exchange
     ! strongly, so this gives it up exactly where it was not needed.
     do iz = 1, nz
       damp(iz) = 1._f / (1._f + dt_eff / rce%tau_rad(iz))
+      hcap(iz) = (pl(iz) - pl(iz+1)) / rce%grav * rce%cp
     end do
 
     iz = 1
@@ -2081,7 +2115,33 @@ contains
         iz_top = iz_top + 1
       end do
 
-      damp(iz:iz_top) = minval(damp(iz:iz_top))
+      ! A mixed zone exchanges radiation internally and loses heat only
+      ! through its edges, so its collective relaxation is slower than its
+      ! thinnest layer's. Damping the whole zone at the thinnest layer's rate
+      ! slows the zone's clock, which a fixed point does not see but a
+      ! cycling column does: the zone then never applies part of the heating
+      ! the solves computed for it. zone_damp = 1 takes the factor from the
+      ! zone's own response to a uniform warming instead.
+      ! LLM-GENERATED — UNVERIFIED (tier: physics)
+      if (rce%zone_damp == 1 .and. rce%have_jac) then
+        cz = sum(hcap(iz:iz_top))
+        jz = 0._f
+        do i = iz, iz_top
+          do k = iz, iz_top
+            jz = jz + hcap(i) * rce%jac(i, k)
+          end do
+        end do
+        jz = jz / cz
+        if (jz < 0._f) then
+          damp(iz:iz_top) = 1._f / (1._f - dt_eff * jz)
+        else
+          ! A zone whose collective heating grows with temperature has no
+          ! implicit factor to give; keep the fastest layer's damping.
+          damp(iz:iz_top) = minval(damp(iz:iz_top))
+        end if
+      else
+        damp(iz:iz_top) = minval(damp(iz:iz_top))
+      end if
       iz = iz_top + 1
     end do
 
@@ -2118,13 +2178,64 @@ contains
       rce%lambda = max(2._f * rce%lambda, LAMBDA_MIN)
     end if
 
+    rce%e_comp = rce%e_comp + dt_eff * sum(hcap(:) * rce%dtdt(:))
+    rce%e_appl = rce%e_appl + sum(hcap(:) * dt_col(:))
+    if (.not. allocated(rce%e_comp_z)) then
+      allocate(rce%e_comp_z(nz), rce%e_appl_z(nz))
+      rce%e_comp_z(:) = 0._f
+      rce%e_appl_z(:) = 0._f
+    end if
+    rce%e_comp_z(:) = rce%e_comp_z(:) + dt_eff * hcap(:) * rce%dtdt(:)
+    rce%e_appl_z(:) = rce%e_appl_z(:) + hcap(:) * dt_col(:)
+    do iz = 1, nz
+      if (rce%is_conv(iz)) then
+        rce%e_comp_cnv = rce%e_comp_cnv + dt_eff * hcap(iz) * rce%dtdt(iz)
+        rce%e_appl_cnv = rce%e_appl_cnv + hcap(iz) * dt_col(iz)
+      else
+        rce%e_comp_rad = rce%e_comp_rad + dt_eff * hcap(iz) * rce%dtdt(iz)
+        rce%e_appl_rad = rce%e_appl_rad + hcap(iz) * dt_col(iz)
+      end if
+    end do
+
+    ! ---- deep-interior acceleration ----------------------------------------
+    ! The base-connected zone takes (accel_deep - 1) times its own net heating
+    ! on top of the step above, spread as a uniform shift in ln T. With a
+    ! constant adiabatic gradient that shift keeps an adiabat an adiabat; the
+    ! fitted gradient falls with T, so warming leaves each interface slightly
+    ! superadiabatic (and cooling slightly subadiabatic), which the adjustment
+    ! then repairs. The extra enthalpy therefore mostly stays where it was put
+    ! rather than being carried up the zone by the adjustment.
+    ! Applied after the trust region and outside dt_lay, so the solve cadence
+    ! is that of the unaccelerated column.
+    ! LLM-GENERATED — UNVERIFIED (tier: physics)
+    if (rce%accel_deep /= 1._f .and. rce%nz_rcb > 0) then
+      heat_deep = 0._f
+      capt_deep = 0._f
+      do iz = 1, rce%nz_rcb
+        heat_deep = heat_deep + (pl(iz) - pl(iz+1)) * dt_col(iz)
+        capt_deep = capt_deep + (pl(iz) - pl(iz+1)) * t(iz)
+      end do
+      if (capt_deep > 0._f) then
+        x_deep = (rce%accel_deep - 1._f) * heat_deep / capt_deep
+        ! A backstop on the relative step, far above what a spin-up uses
+        ! (~1e-4), so a held heating rate cannot run the zone away.
+        x_deep = sign(min(abs(x_deep), 1.e-2_f), x_deep)
+        do iz = 1, rce%nz_rcb
+          dt_col(iz) = dt_col(iz) + t(iz) * x_deep
+        end do
+        rce%e_deep = rce%e_deep + x_deep * sum(hcap(1:rce%nz_rcb) * t(1:rce%nz_rcb))
+      end if
+    end if
+
     do iz = 1, nz
       t(iz) = t(iz) + dt_col(iz)
     end do
 
     ! ---- mix away whatever the heating left superadiabatic ----------------
+    e_pre = sum(hcap(:) * t(:))
     call rce_conv_adj(rce, p, pl, t, rce%is_conv, rce%nz_rcb, rce%nzone, &
                       rce%conv_resid)
+    rce%e_adj = rce%e_adj + (sum(hcap(:) * t(:)) - e_pre)
 
     ! ---- move the altitude grid to match the new temperature --------------
     call rce_level_temps(nz, p, pl, t, rce%tl)

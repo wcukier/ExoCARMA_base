@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -7,7 +9,7 @@
 !! @author Eric Jensen, Bill McKie
 !! @version Sep-1997
 !subroutine microfast(carma, cstate, iz, rc)
-subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)      !PETER
+subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in, dt_suggest, gc_base, gas_check)      !PETER
 
   ! types
   use carma_precision_mod
@@ -28,23 +30,32 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
   real(kind=f), optional, intent(in)   :: maxrate     !! PETER
   real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
   real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
+  real(kind=f), intent(inout)          :: dt_suggest  !! substep size the failing rates could tolerate [s];
+                                                      !! only ever reduced, and only meaningful when a
+                                                      !! RC_WARNING_RETRY is issued
+  real(kind=f), intent(in)             :: gc_base(NGAS) !! gas at the start of the substep, to which gsolve applies
+                                                        !! the condensate change [g/x/y/z]
+  integer, intent(in)                  :: gas_check   !! gsolve check mode (0 none, 1 retry only, 2 retry and clamp)
 
   ! Local Variables
   integer                              :: ielem   ! element index
   integer                              :: ibin    ! bin index
   integer                              :: igas    ! gas index
+  integer                              :: jgroup  ! group index for supersaturation checks
   integer                              :: igrp    ! group index (rnuclgsum precompute)
   integer                              :: jgrp    ! source group index (rnuclgsum precompute)
   real(kind=f)                         :: previous_ice(NGAS)      ! total ice at the start of substep
   real(kind=f)                         :: previous_liquid(NGAS)   ! total liquid at the start of substep
-  real(kind=f)                         :: previous_supsatl(NGAS)  ! supersaturation wrt ice at the start of substep
-  real(kind=f)                         :: previous_supsati(NGAS)  ! supersaturation wrt liquid at the start of substep
+  real(kind=f)                         :: previous_rlheat  ! latent heat of condensate at start of substep [erg]
+  real(kind=f)                         :: previous_supsatl(NGROUP)  ! supersaturation wrt liquid at the start of substep
+  real(kind=f)                         :: previous_supsati(NGROUP)  ! supersaturation wrt ice at the start of substep
   real(kind=f)                         :: supsatold
   real(kind=f)                         :: supsatnew
   real(kind=f)                         :: srat
   real(kind=f)                         :: srat1
   real(kind=f)                         :: srat2
   real(kind=f)                         :: s_threshold
+  real(kind=f), parameter              :: DT_SAFETY = 0.5_f  ! margin on rate-informed substep suggestions
 
   1 format(/,'microfast::ERROR - excessive change in supersaturation for ',a,' : iz=',i4,',lat=', &
               f7.2,',lon=',f7.2,',srat=',e10.3,',supsatiold=',e10.3,',supsatlold=',e10.3,',supsati=',e10.3, &
@@ -71,23 +82,19 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
 
     ! Save off the current condensate totals so the gas and latent heating can be
     ! figured out in a way that conserves mass and energy.
-    call totalcondensate(carma, cstate, iz, previous_ice, previous_liquid, rc)
+    call totalcondensate(carma, cstate, iz, previous_ice, previous_liquid, previous_rlheat, rc)
     if (rc < RC_OK) return
 
     !write(*,*) "after totalcondensate"
 
        
 
-    do igas = 1, NGAS
-     ! write(*,*) igas, "before supersat"
-      call supersat(carma, cstate, iz, igas, rc)
-      !write(*,*) igas, "after supersat"
+    do jgroup = 1, NGROUP
+      call supersat(carma, cstate, iz, jgroup, rc)
       if (rc < RC_OK) return
 
-      !write(*,*) igas, supsatl(iz,igas) 
-    
-      previous_supsati(igas) = supsati(iz, igas)
-      previous_supsatl(igas) = supsatl(iz, igas)     
+      previous_supsati(jgroup) = supsati(iz, jgroup)
+      previous_supsatl(jgroup) = supsatl(iz, jgroup)
     end do
     
     ! Have water vapor and sulfuric acid been defined?
@@ -194,7 +201,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
   if (do_grow) then
 
    ! write(*,*) "evapp, downgxfer, downevapply, gsolve"
-    call evapp(carma, cstate, iz, rc)
+    call evapp(carma, cstate, iz, rc, dtime_in)
     if (rc < RC_OK) return
 
     call downgxfer(carma, cstate, iz, rc)
@@ -208,7 +215,8 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
     call downgevapply(carma, cstate, iz, rc, dtime_in)
     if (rc < RC_OK) return
 
-    call gsolve(carma, cstate, iz, previous_ice, previous_liquid, rc, dtime_in, nretries_in)
+    call gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlheat, rc, dtime_in, nretries_in, dt_suggest, &
+                gc_base, gas_check)
     if (rc /=RC_OK) return
   endif
 
@@ -224,22 +232,24 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
 
   !  Update saturation ratios
   if (do_grow .or. do_thermo) then
-    do igas = 1, NGAS
+    do jgroup = 1, NGROUP
 
-    !  write(*,*) "supersat again"
-      call supersat(carma, cstate, iz, igas, rc)
+      call supersat(carma, cstate, iz, jgroup, rc)
       if (rc < RC_OK) return
 
-     ! write(*,*) "done with supersat again"
-    
+      ! The convergence thresholds and diagnostics are keyed to the group's
+      ! gas reservoir; a group with no growth pathway has nothing to check.
+      igas = igrowgas(ienconc(jgroup))
+      if (igas == 0) cycle
+
       ! Check to see how much the supersaturation changed during this step. If it
       ! has changed to much, then cause a retry.
       if (t(iz) >= 0._f) then
-        supsatold = previous_supsatl(igas)
-        supsatnew = supsatl(iz,igas)
+        supsatold = previous_supsatl(jgroup)
+        supsatnew = supsatl(iz,jgroup)
       else
-        supsatold = previous_supsati(igas)
-        supsatnew = supsati(iz,igas)
+        supsatold = previous_supsati(jgroup)
+        supsatnew = supsati(iz,jgroup)
       end if
 
       ! If ds_threshold is positive, then it indicates that the criteria should
@@ -266,17 +276,24 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
             if (do_substep) then
               if (nretries_in == maxretries) then 
                 if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-		              lat, lon, srat, previous_supsati(igas), previous_supsatl(igas), &
-                supsati(iz, igas), supsatl(iz,igas), t(iz)       
-                if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz, igas), &
-		              supsatlold(iz,igas), told(iz), d_gc(iz, igas), d_t(iz)
+		              lat, lon, srat, previous_supsati(jgroup), previous_supsatl(jgroup), &
+                supsati(iz, jgroup), supsatl(iz,jgroup), t(iz)       
+                if (do_print) write(LUNOPRT,2) gcl(iz,igas), supsatiold(iz, jgroup), &
+		              supsatlold(iz,jgroup), told(iz), d_gc(iz, igas), d_t(iz)
               end if
-              
+
+              ! Suggest the substep that would hold the fractional
+              ! supersaturation change at the threshold, with margin.
+              if (srat > 0._f) then
+                dt_suggest = min(dt_suggest, &
+                                 DT_SAFETY * dtime_in * ds_threshold(igas) / srat)
+              end if
+
               rc = RC_WARNING_RETRY
             else
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), &
 		              iz, lat, lon, gc(iz,igas), gasprod(igas,iz), &
-                  supsati(iz, igas), supsatl(iz,igas), t(iz)
+                  supsati(iz, jgroup), supsatl(iz,jgroup), t(iz)
             end if
           end if
         end if
@@ -313,17 +330,24 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in)     
           if (do_substep) then
             if (nretries_in == maxretries) then 
               if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
-		              lat, lon, previous_supsati(igas), previous_supsatl(igas), &
-              	  supsati(iz, igas), supsatl(iz,igas), t(iz)
-              if (do_print) write(LUNOPRT,3) gcl(iz,igas), supsatiold(iz, igas), &
-	              	supsatlold(iz,igas), told(iz), d_gc(iz, igas), d_t(iz)
+		              lat, lon, previous_supsati(jgroup), previous_supsatl(jgroup), &
+              	  supsati(iz, jgroup), supsatl(iz,jgroup), t(iz)
+              if (do_print) write(LUNOPRT,3) gcl(iz,igas), supsatiold(iz, jgroup), &
+	              	supsatlold(iz,jgroup), told(iz), d_gc(iz, igas), d_t(iz)
             end if
           else
             if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &
 		              lat, lon, gc(iz,igas), gasprod(igas,iz), &
-              	  supsati(iz, igas), supsatl(iz,igas), t(iz)
+              	  supsati(iz, jgroup), supsatl(iz,jgroup), t(iz)
           end if
-          
+
+          ! Suggest the substep that would just reach the zero crossing
+          ! instead of overshooting it, with margin.
+          if (abs(supsatnew - supsatold) > 0._f) then
+            dt_suggest = min(dt_suggest, &
+                             DT_SAFETY * dtime_in * abs(supsatold) / abs(supsatnew - supsatold))
+          end if
+
           rc = RC_WARNING_RETRY
         end if
       end if

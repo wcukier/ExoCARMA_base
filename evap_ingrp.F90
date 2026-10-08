@@ -9,7 +9,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Aug-2001
-subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
+subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
 
 	! types
   use carma_precision_mod
@@ -30,6 +30,8 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
   integer, intent(in)                  :: ig      !! group index
   integer, intent(in)                  :: ip
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
+  real(kind=f)                         :: consfact !! consistent-transfer factor
 
   ! Local declarations
   integer                              :: ie  
@@ -45,11 +47,18 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
     return
   endif
 
+  ! Consistent evaporation transfer: bound the explicit production by what
+  ! the donor bin's implicit loss actually surrenders (see evapp).
+  consfact = 1._f
+  if (do_cons_evap) then
+    consfact = 1._f / (1._f + evaplg(ibin,ig,iz)*dtime_in)
+  end if
+
   ! Evaluate evaporation source term <evappe> for all elements in group
   do isub = 1, nelemg(ig)
     ie = ip + isub - 1
     evappe(ibin-1,ie,iz) = evappe(ibin-1,ie,iz) + &
-      pc(iz,ibin,ie)*evaplg(ibin,ig,iz)
+      pc(iz,ibin,ie)*evaplg(ibin,ig,iz)*consfact
     !write(*,*) 'ingrp', iz, ig, isub, ie, ibin, evappe(ibin-1,ie), pc(iz,ibin,ie), evaplg(ibin,ig)
   enddo
 

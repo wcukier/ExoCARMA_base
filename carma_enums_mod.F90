@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 !! This module is part of the CARMA module and contains enumerations that are part of
 !! the CARMA and CARMASTATE objects.
 !!
@@ -133,6 +135,7 @@ module carma_enums_mod
   integer, public, parameter :: I_GCOMP_TIO2            = 13 !! TiO2
   integer, public, parameter :: I_GCOMP_AL2O3           = 14 !! Al2O3
   integer, public, parameter :: I_GCOMP_CO              = 15 !! CO
+  integer, public, parameter :: I_GCOMP_SIO             = 16 !! SiO
   
   ! How is the CARMA group represented in the parent model
   integer, public, parameter :: I_CNSTTYPE_PROGNOSTIC   = 1   !! Prognostic, advected constituent for each bin
