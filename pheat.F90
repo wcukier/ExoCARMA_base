@@ -187,14 +187,12 @@ subroutine pheat(carma, cstate, iz, igroup, iepart, ibin, igas, dmdt, rc, dtime_
 
   ! A condensate whose key reactant has swapped grows by the impingement of
   ! that reactant: its kernels, and its equilibrium partial pressure p_a / S_r.
-  if (do_key_swap) then
-    ia = ikey(iz,igroup)
-    if ((ia /= igas) .and. (ia /= 0)) then
-      g0   = grok(iz,ibin+1,igroup,ia)
-      g1   = gro1k(iz,ibin+1,igroup,ia)
-      pvap = max(gc(iz,ia), 0._f) / (zmet(iz)*xmet(iz)*ymet(iz)) * (RGAS / gwtmol_dif(ia)) * t(iz) &
-             / max(ss + 1._f, 1.e-30_f)
-    end if
+  ia = ikey(iz,igroup)
+  if ((ia /= igas) .and. (ia /= 0)) then
+    g0   = grok(iz,ibin+1,igroup,ia)
+    g1   = gro1k(iz,ibin+1,igroup,ia)
+    pvap = max(gc(iz,ia), 0._f) / (zmet(iz)*xmet(iz)*ymet(iz)) * (RGAS / gwtmol_dif(ia)) * t(iz) &
+           / max(ss + 1._f, 1.e-30_f)
   end if
 
 

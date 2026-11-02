@@ -58,9 +58,7 @@ contains
       return
     end if
 
-    ! Save off the settings.  The gas carries only gas-phase properties;
-    ! condensate properties (vapor pressure, surface tension, ...) live on
-    ! the group(s) that condense this gas.
+    ! Save off the settings.
     carma%f_gas(igas)%f_name         = name
     carma%f_gas(igas)%f_wtmol_dif    = wtmol_dif
     carma%f_gas(igas)%f_icomposition = icomposition

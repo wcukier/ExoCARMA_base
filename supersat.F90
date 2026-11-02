@@ -5,9 +5,7 @@
 #include "carma_globaer.h"
 
 !!  This routine evaluates supersaturations <supsatl> and <supsati> for one
-!!  condensate (group).  The supersaturation is a property of the condensate,
-!!  not the gas: several groups may share one gas reservoir yet have
-!!  different vapor pressures.
+!!  condensate (group).
 !!
 !! @author Andy Ackerman, Chuck Bardeen
 !! @version Dec-1995, Aug-2010
@@ -88,30 +86,26 @@ subroutine supersat(carma, cstate, iz, igroup, rc)
     supsati(iz,igroup) = (gc_cgs * rvap * t(iz) - pvapi(iz,igroup)) / pvapi(iz,igroup)
   endif
 
-  ! With key swapping, the reaction supersaturation also follows the secondary
-  ! reactants: the vapor-pressure fit assumes each at its reference abundance,
-  ! so S_r scales by (x_j / x_ref,j)**(nu_j / nu_fit) for each of them.  The
-  ! factor is unity while every secondary reactant sits at its reference, and
-  ! drives S_r to zero as any of them is exhausted.
-  if (do_key_swap) then
-    act = 1._f
-    do j = 1, carma%f_ndepgas(igroup)
-      jgas = carma%f_idepgas(j, igroup)
-      if (jgas == igas) cycle
-      if (xref(igroup, jgas) <= 0._f) cycle
-      x    = max(gc(iz,jgas), 0._f) / rhoa(iz) / xref(igroup, jgas)
-      expo = real(carma%f_nu_dep(igroup, jgas), f) / real(carma%f_group(igroup)%f_stofact, f)
-      if (expo == 1._f) then
-        act = act * x
-      else if (expo == 0.5_f) then
-        act = act * sqrt(x)
-      else
-        act = act * x**expo
-      end if
-    end do
-    supsatl(iz,igroup) = (supsatl(iz,igroup) + 1._f) * act - 1._f
-    supsati(iz,igroup) = (supsati(iz,igroup) + 1._f) * act - 1._f
-  end if
+  ! Scale S_r by (x_j / x_ref,j)**(nu_j / nu_key) for each secondary reactant
+  ! j, since the vapor-pressure fit assumes each at its reference abundance
+  ! x_ref,j.
+  act = 1._f
+  do j = 1, carma%f_ndepgas(igroup)
+    jgas = carma%f_idepgas(j, igroup)
+    if (jgas == igas) cycle
+    if (xref(igroup, jgas) <= 0._f) cycle
+    x    = max(gc(iz,jgas), 0._f) / rhoa(iz) / xref(igroup, jgas)
+    expo = real(carma%f_nu_dep(igroup, jgas), f) / real(carma%f_group(igroup)%f_stofact, f)
+    if (expo == 1._f) then
+      act = act * x
+    else if (expo == 0.5_f) then
+      act = act * sqrt(x)
+    else
+      act = act * x**expo
+    end if
+  end do
+  supsatl(iz,igroup) = (supsatl(iz,igroup) + 1._f) * act - 1._f
+  supsati(iz,igroup) = (supsati(iz,igroup) + 1._f) * act - 1._f
 
   ! For subgrid scale clouds, the supersaturation needs to be increased be scaled
   ! based upon cloud fraction. This approach is similar to Wilson and Ballard (1999),

@@ -69,11 +69,8 @@ subroutine setupgrow(carma, cstate, rc)
     rhoa_cgs = rhoa(k) / (xmet(k) * ymet(k) * zmet(k))
 
     ! Diffusivity of each gas in air from Pruppacher & Klett (eq. 13-3);
-    ! units are [cm^2/s].  The collision diameter is stored on the group; all
-    ! groups sharing a gas reservoir describe the same diffusing molecule, so
-    ! the first group keyed to the gas supplies it.  The stoichiometric
-    ! (key-educt) factor is applied to the growth kernel in setupgkern, not
-    ! here, so diffus stays a pure gas-in-air property.
+    ! units are [cm^2/s]. The collision diameter comes from the first group
+    ! keyed to the gas. The stoichiometric factor is applied in setupgkern.
     have_diffus(:) = .false.
     diffus(k,:) = 0._f
 

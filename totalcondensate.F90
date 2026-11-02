@@ -5,10 +5,8 @@
 #include "carma_globaer.h"
 
 !! This routine calculates the total amount of condensate associated with
-!! each gas, in units of the gas mass consumed to form it, along with the
-!! total latent heat content of the condensate.  Several groups may deplete
-!! one gas; each contributes with its own stoichiometric mass-conversion
-!! factor and latent heat.
+!! each gas, in units of the gas mass consumed to form it, and the total
+!! latent heat content of the condensate.
 !!
 !! @author Chuck Bardeen
 !! @version Nov-2009
@@ -75,9 +73,7 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlh
 
     if ((itype(ielem) == I_VOLATILE) .and. (igas /= 0)) then
 
-      ! Mass of key gas consumed per mass of condensate formed (used for the
-      ! latent-heat accounting; the gas budget below sums over every gas the
-      ! group depletes).
+      ! Mass of key gas consumed per mass of condensate, for the latent heat
       sto_vol = carma%f_dgas_dcond(igroup, igas)
 
       do ibin = 1, NBIN
@@ -107,9 +103,8 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlh
         ! NOTE: This can be caused by advection in the parent model or sedimentation
         ! in this model.
         if (volatilemass > 0._f) then
-          ! Each gas the group depletes is charged with its own
-          ! stoichiometric conversion.  Latent heat is released once per
-          ! condensate, accounted with the key gas mass.
+          ! Charge every gas the group depletes; count the latent heat once,
+          ! per mass of key gas.
           if (is_grp_ice(igroup)) then
             do j = 1, carma%f_ndepgas(igroup)
               jgas = carma%f_idepgas(j, igroup)

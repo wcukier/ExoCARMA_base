@@ -205,15 +205,11 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_arat       ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rrat       ! (NBIN)
     real(kind=f)                                :: f_dpc_threshold
-    ! Condensate properties of the volatile element in this group.  These
-    ! live on the group (not the gas) so several condensates can share one
-    ! gas reservoir.
+    ! Condensate properties of the volatile element in this group.
     !   wtmol       Molecular weight of the condensate [g/mol]
     !   wtmol_core  Molecular weight of the core condensate [g/mol]
     !   ivaprtn     vapor pressure routine for the condensate
     !   desorption  user-specified desorption energy [eV], -1 = auto
-    !   gstick      growth sticking coefficient of this group; <= 0 (default -1)
-    !               uses the global gstickl / gsticki
     real(kind=f)                                :: f_wtmol         ! WC
     real(kind=f)                                :: f_wtmol_core    ! WC
     integer                                     :: f_ivaprtn       ! WC
@@ -229,7 +225,6 @@ module carma_types_mod
     real(kind=f)                                :: f_vp_metcoeff   ! WC
     real(kind=f)                                :: f_vp_logpcoeff  ! WC
     integer                                     :: f_stofact       ! WC
-    real(kind=f)                                :: f_gstick
   end type carmagroup_type
   
   
@@ -411,7 +406,7 @@ module carma_types_mod
     logical                                       :: f_do_print_init
     logical                                       :: f_do_step
     logical                                       :: f_do_substep
-    logical                                       :: f_do_cons_evap    !! .true. to scale explicit evaporation production by 1/(1+evaplg*dt) so a bin cannot receive more mass than its donor's implicit loss surrenders (prevents runaway amplification of the evaporation cascade where evaplg*dt >> 1)
+    logical                                       :: f_do_cons_evap    !! cap evaporation transfer at the donor's implicit loss
     logical                                       :: f_do_t_evolves    !! .true. if temperature evolves between steps (e.g. radiative coupling). When .false., setupgkern caches its outputs after the first call.
     logical                                       :: f_do_thermo
     logical                                       :: f_do_cnst_rlh
@@ -440,8 +435,6 @@ module carma_types_mod
     real(kind=f)                                  :: f_implicit_trigger   ! relative gas change above which the implicit solve runs
     real(kind=f)                                  :: f_implicit_rtol      ! relative tolerance on the implicit gas fixed point
     integer                                       :: f_implicit_maxit     ! Newton iteration cap for the implicit gas solve
-    real(kind=f)                                  :: f_implicit_dgmax     ! largest relative gas change an implicit substep may take
-    logical                                       :: f_do_key_swap        ! let condensates swap their key reactant to the limiting one
     integer                                       :: f_ifall
     integer                                       :: f_icoagop
     integer                                       :: f_icollec
@@ -914,9 +907,7 @@ module carma_types_mod
     !   dtpart    Delta particle temperature [K]
     !   phprod    Particle heating production (substep) [K/s]
     !
-    ! Thermodynamic state of each condensate is per GROUP (several groups may
-    ! share one gas reservoir); diffus is a property of the gas in air and
-    ! stays per gas.
+    ! Condensate thermodynamic state is per group; diffus is per gas.
     real(kind=f), allocatable, dimension(:,:)    :: f_diffus     ! (NZ,NGAS)
     real(kind=f), allocatable, dimension(:,:)    :: f_rlhe       ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:)    :: f_rlhm       ! (NZ,NGROUP)

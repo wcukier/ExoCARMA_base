@@ -1,23 +1,15 @@
 !! Correlated-k gas opacity for the radiatively coupled version of CARMA.
 !!
-!! Reads the flat binary written by ``carmapy.radiation.export_ck_table`` --
-!! Sonora 2020 correlated-k data, originally a TorchScript container produced by
-!! pyHARP -- and interpolates it onto the model's (pressure, temperature)
-!! profile.
-!!
-!! Contract, taken from ``pyharp/python/sonora/sonora.py`` and
-!! ``pyharp/src/opacity/multiband.cpp``:
+!! Reads the Sonora 2020 correlated-k table written by
+!! ``carmapy.radiation.export_ck_table`` and interpolates it onto the model's
+!! (pressure, temperature) profile. Table format (as in pyHARP):
 !!
 !!  * Spectral points are band-major: ``iwave = (iband-1)*ng + ig``.
-!!  * ``kappa`` is stored as **ln(cm^2 / molecule)**; pyHARP converts to an
-!!    attenuation coefficient with ``1e-4 * N_A * exp(kappa) * conc``, where
-!!    ``conc`` is a mole concentration in mol/m^3. That gives 1/m.
-!!  * The temperature axis is **absolute** temperature.
-!!  * pyHARP interpolates with ``extrapolate=false``, so values are **clamped**
-!!    at the table edges rather than extrapolated. This matters for brown
-!!    dwarfs: ``extend_atmosphere`` reaches well past the table's deepest
-!!    pressure, and those layers are convective anyway, so holding kappa at the
-!!    edge value is both faithful to the reference and physically harmless.
+!!  * ``kappa`` is stored as ln(cm^2/molecule); the attenuation coefficient is
+!!    ``1e-4 * N_A * exp(kappa) * conc`` [1/m], with ``conc`` in mol/m^3.
+!!  * The temperature axis is absolute temperature.
+!!  * Values are clamped at the table edges, not extrapolated. Layers deeper
+!!    than the table's last pressure are convective, so this is harmless.
 !!
 !! @author Wolf Cukier
 module carma_ckopacity
@@ -33,7 +25,7 @@ module carma_ckopacity
   integer(kind=8), parameter :: CK_MAGIC   = int(z'43524D41434B3031', kind=8)
   integer(kind=8), parameter :: CK_VERSION = 1_8
 
-  !! Avogadro's number, matching harp::constants::Avogadro.
+  !! Avogadro's number [1/mol].
   real(kind=f), parameter, public :: CK_AVOGADRO = 6.02214076e23_f
 
   !! A loaded correlated-k table.
@@ -140,7 +132,7 @@ contains
       return
     end if
 
-    ! pyHARP interpolates in ln(pressure); do the log once here.
+    ! The pressure axis is interpolated in ln(p).
     do i = 1, tbl%npres
       tbl%lnp(i) = log(pres(i))
     end do
@@ -174,10 +166,7 @@ contains
 
   !! Locate x in an ascending grid, returning the lower bracket index i and the
   !! interpolation fraction w such that the value is
-  !! ``(1-w)*v(i) + w*v(i+1)``.
-  !!
-  !! Outside the grid, w is clamped to 0 or 1 -- matching pyHARP's
-  !! ``interpn(..., extrapolate=false)``.
+  !! ``(1-w)*v(i) + w*v(i+1)``. Outside the grid, w is clamped to 0 or 1.
   pure subroutine locate_clamped(grid, x, i, w)
 
     implicit none
@@ -231,13 +220,8 @@ contains
 
   !! Gas attenuation coefficient for every spectral point over a whole column.
   !!
-  !! Bilinear in (ln p, T) at each g-point. The wavenumber axis of pyHARP's
-  !! trilinear ``interpn`` is a no-op here because we always evaluate at the
-  !! table's own spectral points, so it is omitted.
-  !!
-  !! Returns the attenuation coefficient in **1/m**, i.e. pyHARP's
-  !! ``1e-4 * N_A * exp(kappa) * conc`` with ``conc`` the gas mole
-  !! concentration in mol/m^3.
+  !! Bilinear in (ln p, T) at each of the table's own spectral points.
+  !! Returns ``1e-4 * N_A * exp(kappa) * conc`` [1/m].
   subroutine ck_kappa_column(tbl, pres_pa, temp_k, conc, beta)
 
     implicit none
@@ -271,8 +255,7 @@ contains
         k01 = tbl%kappa(iw, ip,   it+1)
         k11 = tbl%kappa(iw, ip+1, it+1)
 
-        ! Interpolate in log space, as pyHARP does -- it stores ln(kappa) and
-        ! exponentiates only after interpolating.
+        ! Interpolate ln(kappa), then exponentiate.
         lnk = (1._f - wp) * (1._f - wt) * k00 + wp * (1._f - wt) * k10 &
             + (1._f - wp) *         wt  * k01 + wp *         wt  * k11
 

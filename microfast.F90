@@ -31,8 +31,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in, dt_s
   real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
   real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
   real(kind=f), intent(inout)          :: dt_suggest  !! substep size the failing rates could tolerate [s];
-                                                      !! only ever reduced, and only meaningful when a
-                                                      !! RC_WARNING_RETRY is issued
+                                                      !! only reduced, and set only on RC_WARNING_RETRY
   real(kind=f), intent(in)             :: gc_base(NGAS) !! gas at the start of the substep, to which gsolve applies
                                                         !! the condensate change [g/x/y/z]
   integer, intent(in)                  :: gas_check   !! gsolve check mode (0 none, 1 retry only, 2 retry and clamp)
@@ -237,8 +236,7 @@ subroutine microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in, dt_s
       call supersat(carma, cstate, iz, jgroup, rc)
       if (rc < RC_OK) return
 
-      ! The convergence thresholds and diagnostics are keyed to the group's
-      ! gas reservoir; a group with no growth pathway has nothing to check.
+      ! Thresholds are per gas; skip groups that do not grow.
       igas = igrowgas(ienconc(jgroup))
       if (igas == 0) cycle
 

@@ -70,10 +70,8 @@ subroutine evapp(carma, cstate, iz, rc, dtime_in)
         do ibin = 1, NBIN
           evdrop(iz) = pc(iz,ibin,ip)*evaplg(ibin,ig,iz)
 
-          ! Consistent evaporation transfer: the donor bin's implicit update
-          ! surrenders pc*L*dt/(1+L*dt), not pc*L*dt.  Without this factor
-          ! the cascade amplifies mass by (1+L*dt) per bin hop wherever
-          ! evaplg*dt >> 1 (hot layers far below the cloud base).
+          ! Limit the transfer to what the donor bin's implicit loss
+          ! surrenders, pc*L*dt/(1+L*dt).
           if (do_cons_evap) then
             evdrop(iz) = evdrop(iz) / (1._f + evaplg(ibin,ig,iz)*dtime_in)
           end if

@@ -63,10 +63,8 @@ vaporp_co_wylie1958.html vaporp_user.html sulfate_utils.html sulfnuc.html sulfnu
 carma_precision_mod.o : carma_precision_mod.F90
 	$(FORTRAN) $(FFLAGS) -c $<
 
-# Radiative transfer for the radiatively coupled path. These depend only on
-# the precision module -- they are deliberately kept free of carma_types_mod so
-# they can be compiled standalone and validated against pyHARP; see
-# tests/integration/test_radiation_port.py.
+# Radiative transfer modules. These depend only on the precision module so
+# they can be compiled standalone.
 carma_planck.o : carma_planck.F90 carma_precision_mod.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
@@ -85,12 +83,10 @@ carma_linalg.o : carma_linalg.F90 carma_precision_mod.mod
 carma_rayleigh.o : carma_rayleigh.F90 carma_precision_mod.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
-# The shortwave solver shares dtridgl with the longwave one, so it needs
-# carma_rtsolve's module file and not just the precision kind.
+# The shortwave solver uses dtridgl from carma_rtsolve.
 carma_swsolve.o : carma_swsolve.F90 carma_precision_mod.mod carma_rtsolve.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
-# carma_rce ties the rest together, so it is the one that depends on them all.
 carma_rce.o : carma_rce.F90 carma_precision_mod.mod carma_enums_mod.mod \
               carma_planck.mod carma_ckopacity.mod carma_cloudopt.mod \
               carma_rtsolve.mod carma_linalg.mod carma_rayleigh.mod \

@@ -1,55 +1,27 @@
-!! Radiative-convective temperature evolution for an isolated brown dwarf.
+!! Radiative-convective temperature evolution for a brown dwarf column.
 !!
-!! Turns the radiative transfer of ``carma_rtsolve`` into a temperature
-!! tendency and applies it to the column, so the P-T profile evolves with the
-!! cloud field instead of being held fixed for the whole run.
-!!
-!! Every layer follows the radiative flux divergence,
+!! Each layer is heated by the radiative flux divergence,
 !! ``dT/dt = -dF_net/dz / (rho*Cp)``, and a dry convective adjustment then
-!! removes whatever superadiabatic gradients that leaves behind, mixing each
-!! unstable pair of layers at fixed enthalpy onto the adiabat selected by
-!! ``adiabat`` -- either the Parmentier (2015) analytic fit or the tabulated
-!! H/He gradient. See ``rce_conv_adj``.
+!! mixes every superadiabatic pair of layers at fixed enthalpy onto the
+!! adiabat selected by ``adiabat`` (the Parmentier 2015 fit or the tabulated
+!! H/He gradient). Convective zones are diagnosed per layer in ``is_conv``;
+!! there may be more than one.
 !!
-!! The convective zones are therefore an *output*: they relocate themselves as
-!! the cloud field reshapes the profile, and there may be more than one, since
-!! a cloud deck can drive a detached convective layer aloft over a stable
-!! region. ``is_conv`` carries the per-layer answer.
+!! The net flux through the base of the column is imposed as sigma*t_int**4,
+!! so equilibrium is ``F_TOA == sigma*t_int**4``. An incident beam
+!! (``t_irr > 0``) is added into the same net flux.
 !!
-!! There is no incident radiation: the internal flux is imposed as the net flux
-!! through the base of the column, so radiative-convective equilibrium is the
-!! state in which ``F_TOA == sigma*t_int**4``. For an isolated object that is
-!! also the effective temperature, but the two are distinct quantities and only
-!! the internal one is an input here.
+!! A full solve runs on an adaptive cadence, triggered by accumulated
+!! temperature drift, a change in the cloud cross-section, or a ceiling on
+!! steps since the last solve; the held ``dTdt`` is applied on every step.
+!! ``rce_kzz`` optionally recomputes the mixing-length Kzz from the same solve.
 !!
-!! **Cadence.** A full solve costs roughly as much as the microphysics it sits
-!! next to, and the cloud field barely moves in one timestep, so the solve runs
-!! on an adaptive cadence while the resulting ``dTdt`` is held and applied on
-!! *every* step. Temperature therefore evolves continuously. A fresh solve is
-!! triggered by accumulated temperature drift, by a change in the column's
-!! cloud cross-section, or by a hard ceiling on elapsed steps.
+!! Units are SI (Pa, m, K, W/m^2), except that Cp [erg/g/K] and gravity
+!! [cm/s^2] arrive in cgs from the namelist, and ``cloud_optics_column`` and
+!! ``rce_kzz`` work in cgs.
 !!
-!! **Eddy diffusion.** ``rce_kzz`` recomputes the mixing-length Kzz from the
-!! same solve, so the eddy diffusion the microphysics mixes with follows the
-!! convective heat flux and the lapse rate instead of staying at whatever the
-!! run started from. It is held in ``kzz`` and the driver copies it into
-!! ``ekz``, which the driver already carries across a restart. Nothing here
-!! needs to: the first solve of any run, restarted or not, rebuilds the profile
-!! from the column it finds.
-!!
-!! **Units.** This module is SI throughout -- Pa, m, K, W/m^2 -- matching the
-!! driver's ``p``/``zc``/``zl`` and the radiative transfer modules. The
-!! exceptions are documented at their conversion sites: ``Cp`` arrives in
-!! erg/g/K and gravity in cm/s^2 from the namelist, and ``cloud_optics_column``
-!! and ``rce_kzz`` are cgs.
-!!
-!! **Level temperatures.** The driver carries layer-centre temperatures, but
-!! the Planck source and the hydrostatic regrid both want level values. They
-!! are reconstructed by linear interpolation in ``ln p``, with the two
-!! endpoints extrapolated. The reconstruction depends only on ``t(:)``, so a
-!! restarted run rebuilds the same grid it stopped on; it does not reproduce
-!! the level temperatures Python supplied at step 1, which differ from the
-!! reconstruction by a sub-percent effect on layer thickness.
+!! Level temperatures are reconstructed from the layer-centre ``t`` by linear
+!! interpolation in ``ln p``, extrapolated at the two ends.
 module carma_rce
 
   use carma_precision_mod
@@ -71,16 +43,12 @@ module carma_rce
   public :: rce_grad_ad, rce_grad, rce_integrate_adiabat, rce_load_adiabat
   public :: rce_conv_adj, rce_kzz
   public :: I_KZZ_STATIC, I_KZZ_MIXING_LENGTH
-  !! Exposed so the Jacobian's bandwidth can be measured from outside: the
-  !! banded truncation below is only legitimate if a narrow band captures the
-  !! operator, and that is a property of this discretisation, not of radiative
-  !! transfer, so it has to be measured rather than assumed.
   public :: rce_fluxes, rce_jacobian, rce_solve, rce_optics_prep
   public :: I_ADIABAT_PARMENTIER, I_ADIABAT_TABLE
 
-  !! The eddy diffusion profile supplied at startup is held for the whole run.
+  !! Hold the input Kzz profile for the whole run.
   integer, parameter :: I_KZZ_STATIC        = 0
-  !! Kzz follows the evolving profile, from mixing length theory.
+  !! Recompute Kzz from mixing length theory on each solve.
   integer, parameter :: I_KZZ_MIXING_LENGTH = 1
 
   !! Stefan-Boltzmann constant [ W / m^2 / K^4 ]
@@ -102,70 +70,45 @@ module carma_rce
   !! The tabulated H/He gradient, integrated from the anchor.
   integer, parameter :: I_ADIABAT_TABLE      = 1
 
-  !! Ceiling on the RK4 step used to integrate the tabulated adiabat, in
-  !! ln p. The table's own pressure spacing is 0.2 in log10 p (0.46 in ln p),
-  !! so this puts several steps in every table cell.
+  !! Largest RK4 step in ln p when integrating the tabulated adiabat. The
+  !! table spacing is 0.46 in ln p.
   real(kind=f), parameter :: ADIABAT_DLNP = 0.05_f
 
-  !! 1 bar in Pa. The table's pressure axis is log10 bar; this module is SI.
+  !! 1 bar in Pa. The table's pressure axis is log10 bar.
   real(kind=f), parameter :: BAR2PA = 1.e5_f
 
-  !! Tolerance on the convective adjustment's stability test, as a fraction of
-  !! the pair's temperature: a pair this close to the adiabat counts as
-  !! neutral. Relative rather than the reference's absolute 1e-6 K, which at a
-  !! brown dwarf's 3000 K interior would be 3e-10 -- within roundoff of a chain
-  !! of sixty layers. It is what decides ``is_conv``; in a convecting column
-  !! CONV_ITERMAX, not this, is what ends the sweeps.
+  !! Relative tolerance on the convective stability test: a pair this close to
+  !! the adiabat counts as neutral. Relative because an absolute 1e-6 K (as in
+  !! Exo-FMS) is near roundoff at a 3000 K interior.
   real(kind=f), parameter :: CONV_TOL     = 1.e-9_f
-  !! Cap on the adjustment's sweeps. Higher than the reference's 10 because
-  !! ``pfact`` there is a constant, which makes an unstable pair repairable in
-  !! a single pass, whereas here it depends on the temperatures being adjusted.
-  !!
-  !! Stopping short of an exactly neutral column is by design: the adjustment
-  !! runs every timestep against a profile the previous step already left
-  !! nearly neutral, so the residual relaxes across steps rather than within
-  !! one call. Every sweep conserves enthalpy exactly, so a partial adjustment
-  !! is a smaller correction, never a wrong one. ``resid`` reports what is left.
+  !! Cap on the adjustment's sweeps per call. Each sweep conserves enthalpy, so
+  !! stopping early leaves a residual that relaxes over later steps; ``resid``
+  !! reports it.
   integer, parameter      :: CONV_ITERMAX = 30
 
-  !! Fewest layers a convective zone may span. Flags are set pairwise, so two
-  !! is the shortest run the identification can produce, and a lone pair is the
-  !! signature of a grid-scale oscillation rather than of convection. Three
-  !! demands two adjacent neutral interfaces, which a 2*dz mode cannot fake.
+  !! Fewest layers a convective zone may span. A two-layer zone is the
+  !! signature of a grid-scale (2*dz) oscillation rather than convection.
   integer, parameter      :: CONV_MIN_LAYERS = 3
 
-  !! Floor on the adiabatic gradient used by the adjustment. The Parmentier
-  !! fit crosses zero at PARM_A/PARM_B = 9600 K and is negative above it,
-  !! which is outside the domain it was fitted on and would make the mixing
-  !! below drive the pair apart instead of onto an adiabat. The tabulated
-  !! gradient is positive everywhere, so this binds only on the fit.
+  !! Floor on the adiabatic gradient. The Parmentier fit is negative above
+  !! PARM_A/PARM_B = 9600 K, outside its fitted domain.
   real(kind=f), parameter :: GRAD_AD_MIN = 1.e-3_f
 
-  !! ---- mixing length eddy diffusion -------------------------------------
-  !! The coefficients of the Kzz parameterisation, matching PICASO's
-  !! ``get_kzz`` term for term. See ``rce_kzz``.
-  !!
+  !! ---- mixing length eddy diffusion (PICASO get_kzz), see rce_kzz -------
   !! Scale factor on the mixing length velocity.
   real(kind=f), parameter :: KZZ_SCALEF   = 1._f / 3._f
-  !! Floor on the mixing length as a fraction of the scale height, which is
-  !! what keeps Kzz finite in a stably stratified layer.
+  !! Floor on the mixing length / scale height; keeps Kzz finite in stable
+  !! layers.
   real(kind=f), parameter :: KZZ_MIXL_MIN = 0.1_f
-  !! How fast the convective flux is allowed to fall with height, as a
-  !! fraction of the pressure ratio across the pair of layers. Represents
-  !! convective overshoot; the value is arbitrary.
+  !! Overshoot: the convective flux may fall with height by at most this
+  !! fraction of the pressure ratio across a pair of layers. Arbitrary.
   real(kind=f), parameter :: KZZ_CHF_FALL = 1._f / 3._f
-  !! Floor on the convective flux, as a fraction of the effective temperature
-  !! the column is radiating at. Enters as the fourth power, so this is a
-  !! floor of 6.25e-6 on the flux ratio.
+  !! Floor on the convective flux, sigma*(KZZ_TEFF_MIN*t_int)**4.
   real(kind=f), parameter :: KZZ_TEFF_MIN = 0.05_f
-  !! Specific heat used by the Kzz formula, as a multiple of the specific gas
-  !! constant. This is a diatomic ideal gas, and is deliberately *not*
-  !! ``rce%cp``: the parameterisation was calibrated with it, so substituting
-  !! the run's own Cp would change the answer without changing the physics it
-  !! was fitted to.
+  !! Cp/R used by the Kzz formula (diatomic ideal gas). Not rce%cp: the
+  !! parameterisation was calibrated with this value.
   real(kind=f), parameter :: KZZ_CP_OVER_R = 7._f / 2._f
-  !! Universal gas constant [ erg / mol / K ], the cgs counterpart of RGAS_SI.
-  !! Written as PICASO writes it, so the two agree to the digit.
+  !! Universal gas constant [ erg / mol / K ], PICASO's value.
   real(kind=f), parameter :: RGAS_CGS = 8.3143e7_f
   !! Stefan-Boltzmann constant [ erg / cm^2 / s / K^4 ].
   real(kind=f), parameter :: SIGMA_SB_CGS = 0.56687e-4_f
@@ -174,46 +117,28 @@ module carma_rce
   !! Pa -> barye
   real(kind=f), parameter :: PA2BARYE = 1.e1_f
 
-  !! Temperature perturbation used to measure the Jacobian [K].
-  !!
-  !! Large enough that the flux difference clears round-off in a sum over 1568
-  !! spectral points, and small enough to stay inside one cell of the opacity
-  !! table: the Sonora ck grid is ~50 K wide near 900 K and only piecewise
-  !! linear, so a difference straddling a node measures the kink in the table
-  !! rather than the derivative. A different table needs this re-chosen.
+  !! Temperature perturbation used to measure the Jacobian [K]. Large enough to
+  !! clear roundoff in the spectral sum, small enough to stay within one cell
+  !! of the opacity table (the Sonora ck grid is ~50 K wide near 900 K).
   real(kind=f), parameter :: JAC_DT = 2._f
 
   !! Levenberg damping added to the implicit system's diagonal when a solve
-  !! fails, and the factor it decays by when one succeeds. Zero damping is the
-  !! pure Newton step; large damping approaches the diagonal update.
+  !! fails, and the factor it decays by when one succeeds.
   real(kind=f), parameter :: LAMBDA_MIN   = 1.e-3_f
   real(kind=f), parameter :: LAMBDA_DECAY = 0.5_f
 
-  !! Solves between full Jacobian re-measurements, and the temperature drift
-  !! that forces an early one. A Jacobian costs 2*nz flux evaluations, so it
-  !! cannot ride on the solve trigger -- in a coupled run that fires every
-  !! step.
-  integer, parameter      :: JAC_GAP_DEFAULT = 200
+  !! Solves between Jacobian re-measurements (each costs 2*nz flux
+  !! evaluations), and the temperature drift [K] that forces an early one.
+  integer, parameter      :: JAC_GAP         = 200
   real(kind=f), parameter :: JAC_DRIFT_MAX   = 100._f
 
-  !! Floor on the interval between re-measurements, whatever the drift says.
-  !!
-  !! Without it the drift trigger defeats the cadence: during spin-up a column
-  !! far from equilibrium moves by tens of kelvin per step, so any useful drift
-  !! threshold fires every step, at 2*nz flux evaluations each. A somewhat
-  !! stale Jacobian costs accuracy in the step direction, which the trust
-  !! region and Levenberg damping already handle.
+  !! Fewest solves between re-measurements, so the drift trigger cannot fire
+  !! on every solve during spin-up.
   integer, parameter      :: JAC_GAP_MIN = 50
 
   !! Trust radius on the implicit step [K]: the largest |dT| any layer may take
-  !! in one step before the whole vector is scaled down.
-  !!
-  !! This is *not* the same thing as ``dt_max``, and cannot be folded into it.
-  !! ``dt_max`` is a user-facing backstop that a run may legitimately disable;
-  !! the trust radius is what keeps a Newton step honest when the Jacobian is
-  !! only an approximation to a nonlinear problem. Far from equilibrium the
-  !! linear model predicts steps of thousands of kelvin, which would take the
-  !! column through zero temperature and into NaN.
+  !! before the whole step is scaled down. Far from equilibrium the linear
+  !! model predicts steps of thousands of kelvin.
   real(kind=f), parameter :: DT_TRUST = 20._f
 
   !! erg/g/K -> J/kg/K
@@ -238,19 +163,17 @@ module carma_rce
 
     ! ---- incident shortwave -----------------------------------------------
     !! Irradiation temperature [K]: the incident flux normal to the beam is
-    !! ``sigma * t_irr**4``. Zero means an isolated object and switches the
-    !! whole shortwave path off.
+    !! ``sigma * t_irr**4``. Zero switches the shortwave off.
     real(kind=f) :: t_irr   = 0._f
-    !! Temperature of the blackbody the incident spectrum is *shaped* like.
-    !! It carries no energy scale -- that is t_irr's job -- so the two are
-    !! independent and a hot star at weak irradiation is expressible.
+    !! Blackbody temperature setting the shape of the incident spectrum [K];
+    !! t_irr sets its magnitude.
     real(kind=f) :: t_star  = 0._f
-    !! Cosine of the incidence angle. Also where redistribution lives: 0.5 is
+    !! Cosine of the incidence angle, which also carries redistribution: 0.5 is
     !! a dayside average, 0.25 full redistribution.
     real(kind=f) :: mu0     = 0.5_f
-    !! Surface albedo. Zero for a gas giant, which has no surface.
+    !! Surface albedo; zero for a gas giant.
     real(kind=f) :: w_surf  = 0._f
-    !! True when t_irr > 0, i.e. when there is anything to solve.
+    !! True when t_irr > 0.
     logical      :: sw_on   = .false.
 
     !! Per-band incident flux [W/m^2], summing to sigma*t_irr**4.
@@ -258,30 +181,19 @@ module carma_rce
     !! Per-band Rayleigh attenuation factor: multiply by concentration
     !! [mol/m^3] and path [m] to get an optical depth.
     real(kind=f), allocatable :: ray_fac(:)
-    !! Per-level incidence cosine, carried as an array so a sphericity
-    !! correction can be added without changing the solver's interface.
+    !! Per-level incidence cosine.
     real(kind=f), allocatable :: mu_lev(:)
 
     !! Diagnostics, refreshed on every solve.
     real(kind=f) :: absorbed_sw = 0._f  !! shortwave absorbed by the column [W/m^2]
     real(kind=f) :: reflected_sw = 0._f !! shortwave reflected to space [W/m^2]
 
-    !! Whether the eddy diffusion profile follows the temperature profile.
+    !! I_KZZ_STATIC or I_KZZ_MIXING_LENGTH.
     integer      :: kzz_mode = I_KZZ_STATIC
 
-    !! Multiplier on the mixing length. One is the parameterisation as PICASO
-    !! has it, where L/H is diagnosed from the lapse rate and never exceeds
-    !! one. This is the only free parameter in the scheme, and it is here
-    !! because L/H is otherwise entirely determined by the profile: nothing
-    !! else lets a run ask what a longer or shorter mixing length would do.
-    !! Kzz goes as L^(4/3), so this scales the whole profile by its 4/3 power.
+    !! Multiplier on the mixing length; 1 is PICASO's parameterisation. Kzz
+    !! goes as L^(4/3), so this scales the profile by its 4/3 power.
     real(kind=f) :: kzz_mixl_scale = 1._f
-
-    !! Half-width, in layers, of the smoothing applied to the lapse rate that
-    !! sets the mixing length. Zero is off, and is PICASO's behaviour. See the
-    !! smoothing block in ``rce_kzz`` for why the lapse rate is the term worth
-    !! smoothing.
-    integer      :: kzz_lapse_smooth = 0
 
     !! Which adiabat the convective interior follows.
     integer      :: adiabat = I_ADIABAT_PARMENTIER
@@ -291,23 +203,9 @@ module carma_rce
     real(kind=f), allocatable :: ad_p(:)
     real(kind=f), allocatable :: ad_grad(:,:)
 
-    !! Heating acceleration factor: decouples the radiative clock from the
-    !! microphysical one, to reach equilibrium in a tractable number of
-    !! steps. 1 keeps the two together, so the time history is physical.
+    !! Heating acceleration factor on the radiative timestep. 1 keeps the
+    !! radiative and microphysical clocks together.
     real(kind=f) :: accel   = 1._f
-    !! Heat-capacity divisor for the convective zone reaching the base. The
-    !! deep interior holds most of the column's heat capacity, so an interior
-    !! that starts off its equilibrium adiabat takes ~1e9 s to reach it. The
-    !! zone stops warming only when its net heating averages to zero, so the
-    !! equilibrium is unchanged; 1 keeps the time history physical.
-    !! LLM-GENERATED — UNVERIFIED (tier: physics)
-    real(kind=f) :: accel_deep = 1._f
-    !! How a convective zone's uniform damping factor is chosen: 0 = the
-    !! fastest layer's 1/(1 + dt/tau_rad); 1 = the zone's collective implicit
-    !! factor 1/(1 - dt*J_zone), J_zone = sum_{i,k in zone} C_i J_ik / sum C_i.
-    !! LLM-GENERATED — UNVERIFIED (tier: physics)
-    integer      :: zone_damp = 0
-    real(kind=f) :: dt_max  = 0.5_f !! per-step |dT| clamp [K]
     real(kind=f) :: dt_tol  = 1._f  !! drift before re-solving [K]
     real(kind=f) :: dtau_tol = 0.02_f !! cloud cross-section change before re-solving
     integer      :: gap_max = 100   !! hard ceiling on steps between solves
@@ -324,21 +222,18 @@ module carma_rce
     !! Net upward flux at levels from the last solve [W/m^2].
     real(kind=f), allocatable :: fnet(:)
     !! Eddy diffusion at levels from the last solve [cm^2/s]. Only refreshed
-    !! for I_KZZ_MIXING_LENGTH; the driver holds the input profile otherwise.
+    !! for I_KZZ_MIXING_LENGTH.
     real(kind=f), allocatable :: kzz(:)
-    !! What the convective flux had to be scaled by to carry the internal flux
-    !! at the base of the column. A diagnostic: one means the last solve put
-    !! exactly the imposed flux through the deepest layer.
+    !! Factor the convective flux was scaled by to carry the internal flux at
+    !! the base of the column; 1 in equilibrium.
     real(kind=f) :: kzz_rescale = 1._f
-    !! Local radiative time constant per layer [s], used to stabilise the
-    !! temperature update. See ``rce_update``.
+    !! Local radiative time constant per layer [s], used to damp the
+    !! temperature update.
     real(kind=f), allocatable :: tau_rad(:)
-    !! Which layers the adjustment left convective. The primary description of
-    !! the column's stability, since there can be more than one zone.
+    !! Which layers the adjustment left convective.
     logical, allocatable :: is_conv(:)
     !! Top layer of the convective zone reaching the base of the column, or 0
-    !! when the deepest layer is not convective. A convenience derived from
-    !! ``is_conv``; nothing branches on it.
+    !! when the deepest layer is not convective.
     integer      :: nz_rcb = 0
     !! How many contiguous convective zones ``is_conv`` holds.
     integer      :: nzone  = 0
@@ -348,27 +243,22 @@ module carma_rce
     integer      :: steps_since_solve = 0
     integer      :: nsolve            = 0    !! solves so far, for diagnostics
     integer      :: nclamp            = 0    !! how often the |dT| clamp fired
-    !! Steps that fell back to the per-layer damping because the tridiagonal
+    !! Steps that fell back to the per-layer damping because the implicit
     !! solve was singular or produced a non-finite step.
     integer      :: nfallback         = 0
     real(kind=f) :: dt_since_solve    = 0._f !! model time since last solve [s]
     real(kind=f) :: drift             = 0._f !! accumulated max|dT| since last solve [K]
     real(kind=f) :: xsec_ref         = -1._f !! cloud cross-section at last solve
-    !! Energy budget of the update since the start of the run [J/m^2]: the
-    !! heating the solves computed (sum of C*dtdt*dt, i.e. (F_base - F_TOA)*dt),
-    !! what was applied to t after damping, the implicit solve and the trust
-    !! region, the enthalpy change of the convective adjustment, and the extra
-    !! applied by accel_deep. Diagnostics only; nothing reads them.
+    !! Cumulative energy budget of the update [J/m^2]: heating computed by the
+    !! solves (sum of C*dtdt*dt), heating applied to t, and enthalpy change of
+    !! the convective adjustment.
     !! LLM-GENERATED — UNVERIFIED (tier: physics)
     real(kind=f) :: e_comp = 0._f
     real(kind=f) :: e_appl = 0._f
     real(kind=f) :: e_adj  = 0._f
-    real(kind=f) :: e_deep = 0._f
-    !! The same two budgets per layer [J/m^2].
+    !! Computed and applied, per layer [J/m^2].
     real(kind=f), allocatable :: e_comp_z(:), e_appl_z(:)
-    !! The same two budgets split by whether the layer was stepped as
-    !! radiative (implicit solve, or its per-layer fallback) or as part of a
-    !! convective zone [J/m^2].
+    !! Computed and applied, split into radiative and convective layers [J/m^2].
     real(kind=f) :: e_appl_rad = 0._f, e_comp_rad = 0._f
     real(kind=f) :: e_appl_cnv = 0._f, e_comp_cnv = 0._f
 
@@ -378,21 +268,15 @@ module carma_rce
     real(kind=f), allocatable :: w0_c(:,:)      !! (nband, nz)
     real(kind=f), allocatable :: g_c(:,:)       !! (nband, nz)
     real(kind=f), allocatable :: be(:,:)        !! (nz+1, nband) band Planck [W/m^2/sr]
-    !! (nz, nband) band Planck at the layer centres [W/m^2/sr]. The levels
-    !! above are interpolated from these, and an interpolation cannot see a
-    !! layer-to-layer oscillation, so the solver is given both: the centres
-    !! set how brightly each layer emits, the levels how that varies across it.
+    !! (nz, nband) band Planck at the layer centres [W/m^2/sr]. Passed to the
+    !! solver alongside the levels, which are interpolated and cannot see a
+    !! layer-to-layer oscillation.
     real(kind=f), allocatable :: be_mid(:,:)
     real(kind=f), allocatable :: numden_grp(:,:,:) !! (nz, nbin, ngroup) [#/cm^3]
-    !! Per-spectral-point results, held rather than accumulated so the sum can
-    !! run in a fixed order afterwards: the spectral loop is threaded, and a
-    !! reduction over its iterations would otherwise make the total depend on
-    !! how the points were distributed across threads.
-    !!
-    !! These are the operands of the sum, not the summands. The accumulation
-    !! ``acc + wt*d`` contracts into a single fused multiply-add, so holding the
-    !! product ``wt*d`` would round twice where one rounding happens here; the
-    !! reduction repeats the original expression verbatim on these instead.
+    !! Per-spectral-point results, summed in a fixed order after the threaded
+    !! spectral loop so the total does not depend on the thread layout. The
+    !! operands are stored rather than wt*d, so each accumulation is one
+    !! fused multiply-add.
     real(kind=f), allocatable :: dfl_w(:,:)      !! (nz+1, nwave) f_up - f_dn
     real(kind=f), allocatable :: dfs_w(:,:)      !! (nz+1, nwave) sw_up - sw_dn
     real(kind=f), allocatable :: tautot_w(:,:)   !! (nz, nwave)
@@ -405,13 +289,8 @@ module carma_rce
     !! consumed by the radiative time constant.
     real(kind=f), allocatable :: tau_num(:), tau_den(:)
 
-    !! Jacobian of the heating rate, ``jac(i,k) = d(dTdt_i)/dT_k`` [1/s].
-    !!
-    !! Dense, because it was measured to be. A tridiagonal truncation captures
-    !! only 47-58% of the operator at every depth on this discretisation, and
-    !! gets the sign of the terms it does keep backwards: perturbing one layer
-    !! raises the levels it shares with its neighbours, so they emit more and
-    !! cool, where genuine exchange would warm them. See ``rce_jacobian``.
+    !! Dense Jacobian of the heating rate, ``jac(i,k) = d(dTdt_i)/dT_k`` [1/s].
+    !! See ``rce_jacobian``.
     real(kind=f), allocatable :: jac(:,:)
     !! LU factors of the last implicit system, and its pivots.
     real(kind=f), allocatable :: lu(:,:)
@@ -420,9 +299,8 @@ module carma_rce
     logical :: have_jac = .false.
     !! The profile jac was measured at, for the drift trigger.
     real(kind=f), allocatable :: t_jac(:)
-    !! Solves since jac was last measured, and the ceiling on that.
+    !! Solves since jac was last measured.
     integer :: jac_age = 0
-    integer :: jac_gap = JAC_GAP_DEFAULT
     !! Levenberg damping on the implicit system, raised on a rejected step.
     real(kind=f) :: lambda = 0._f
     !! Scratch for the Jacobian's perturbed evaluations.
@@ -434,15 +312,12 @@ module carma_rce
 contains
 
   !! Set up the radiative-convective update and load the opacity table.
-  !!
-  !! ``cp_cgs`` and ``grav_cgs`` are taken in the units the ``physical_params``
-  !! namelist uses (erg/g/K and cm/s^2) and converted here, so callers do not
-  !! have to.
+  !! ``cp_cgs`` and ``grav_cgs`` are in the namelist's cgs units.
   subroutine rce_init(rce, nz, nbin, ngroup, nband, igridv, ck_path, &
                       t_int, t_irr, t_star, mu0, w_surf, &
                       cp_cgs, grav_cgs, wtmol, &
-                      adiabat, adiabat_path, kzz_mode, kzz_mixl_scale, kzz_lapse_smooth, &
-                      accel, dt_max, dt_tol, dtau_tol, gap_max, rc)
+                      adiabat, adiabat_path, kzz_mode, kzz_mixl_scale, &
+                      accel, dt_tol, dtau_tol, gap_max, rc)
 
     implicit none
 
@@ -452,7 +327,6 @@ contains
     integer, intent(in)      :: adiabat     !! I_ADIABAT_PARMENTIER or _TABLE
     integer, intent(in)      :: kzz_mode    !! I_KZZ_STATIC or _MIXING_LENGTH
     real(kind=f), intent(in) :: kzz_mixl_scale !! multiplier on the mixing length
-    integer, intent(in)      :: kzz_lapse_smooth !! lapse smoothing half-width [layers]
     character(len=*), intent(in) :: adiabat_path !! only read for _TABLE
     real(kind=f), intent(in) :: t_int       !! internal temperature [K]
     real(kind=f), intent(in) :: t_irr       !! irradiation temperature [K], 0 = isolated
@@ -462,7 +336,7 @@ contains
     real(kind=f), intent(in) :: cp_cgs      !! [erg/g/K]
     real(kind=f), intent(in) :: grav_cgs    !! [cm/s^2]
     real(kind=f), intent(in) :: wtmol       !! [g/mol]
-    real(kind=f), intent(in) :: accel, dt_max, dt_tol, dtau_tol
+    real(kind=f), intent(in) :: accel, dt_tol, dtau_tol
     integer, intent(in)      :: gap_max
     integer, intent(inout)   :: rc
 
@@ -471,9 +345,7 @@ contains
     call ck_load(ck_path, rce%ck, rc)
     if (rc < 0) return
 
-    ! Cloud optics are tabulated on band centres, so the two spectral grids
-    ! have to be the same set of bands. A mismatch means the Mie tables were
-    ! generated against a different ck table.
+    ! The cloud optics must be on the ck table's bands.
     if (rce%ck%nband /= nband) then
       write(*,*) 'rce_init::ERROR - ck table has', rce%ck%nband, &
                  'bands but the cloud optics were generated for', nband
@@ -495,10 +367,9 @@ contains
     rce%mu0    = mu0
     rce%w_surf = w_surf
 
-    ! A shaped spectrum needs a temperature to be shaped by. Falling back on
-    ! the irradiation temperature reproduces the common case where the beam is
-    ! a blackbody carrying exactly its own flux.
+    ! Default to a blackbody beam at the irradiation temperature.
     if (rce%t_star <= 0._f) rce%t_star = t_irr
+
     rce%cp     = cp_cgs   * CP_CGS2SI
     rce%grav   = grav_cgs * ACC_CGS2SI
     rce%wtmol  = wtmol
@@ -511,9 +382,7 @@ contains
 
     rce%kzz_mode = kzz_mode
 
-    ! A non-positive multiplier would put a zero or negative mixing length into
-    ! a 4/3 power. Caught here rather than at the use site, which is inside the
-    ! per-layer loop of a pure routine with nowhere to report from.
+    ! Checked here because rce_kzz is pure and cannot report an error.
     if (kzz_mixl_scale <= 0._f) then
       write(*,*) 'rce_init::ERROR - kzz_mixl_scale must be positive, got', &
                  kzz_mixl_scale
@@ -522,16 +391,7 @@ contains
     end if
     rce%kzz_mixl_scale = kzz_mixl_scale
 
-    if (kzz_lapse_smooth < 0) then
-      write(*,*) 'rce_init::ERROR - kzz_lapse_smooth must be non-negative, got', &
-                 kzz_lapse_smooth
-      rc = -1
-      return
-    end if
-    rce%kzz_lapse_smooth = kzz_lapse_smooth
-
     rce%accel    = accel
-    rce%dt_max   = dt_max
     rce%dt_tol   = dt_tol
     rce%dtau_tol = dtau_tol
     rce%gap_max  = gap_max
@@ -569,11 +429,8 @@ contains
   end subroutine rce_init
 
 
-  !! Build the incident spectrum and the Rayleigh cross-sections, once.
-  !!
-  !! Both depend only on the band grid and on ``t_star`` / ``t_irr``, none of
-  !! which move during a run, so this is startup work rather than per-solve
-  !! work.
+  !! Build the incident spectrum and the Rayleigh cross-sections, which are
+  !! fixed for the run.
   subroutine rce_init_shortwave(rce)
 
     implicit none
@@ -593,10 +450,7 @@ contains
     if (.not. rce%sw_on) return
 
     ! ---- incident spectrum -------------------------------------------------
-    ! The shape is a blackbody at t_star; the magnitude is set by t_irr. They
-    ! are separated because a companion's spectrum and the amount of it that
-    ! arrives are independent facts, and folding them together would make a
-    ! weakly irradiated hot primary inexpressible.
+    ! Shape is a blackbody at t_star, magnitude sigma*t_irr**4.
     do iband = 1, rce%nband
       rce%f0(iband) = bbflux_wavenumber(rce%ck%wmin(iband), &
                                         rce%ck%wmax(iband), rce%t_star)
@@ -607,17 +461,13 @@ contains
     if (total > 0._f) then
       rce%f0(:) = rce%f0(:) * (SIGMA_SB * rce%t_irr**4) / total
     else
-      ! t_star so low that the band set captures no flux at all. Rather than
-      ! divide by zero, put the whole budget in the longest-wavelength band,
-      ! which is where it would have gone.
+      ! t_star too low for the bands to capture any flux: put it all in the
+      ! longest-wavelength band.
       rce%f0(rce%nband) = SIGMA_SB * rce%t_irr**4
     end if
 
     ! ---- Rayleigh ----------------------------------------------------------
-    ! Evaluated at the band centre, matching how the cloud optics are
-    ! tabulated. For a lambda^-4 law across a wide band that slightly
-    ! underestimates the band mean; the bands are narrow enough that this is
-    ! well inside the error already accepted in the cross-section itself.
+    ! Evaluated at the band centre, like the cloud optics.
     x(:) = RAY_SOLAR_H2HE(:)
 
     do iband = 1, rce%nband
@@ -627,8 +477,7 @@ contains
       lam_cm = 1._f / wn_c
       sig    = ray_sigma_mix(x, lam_cm)
 
-      ! Same conversion the gas opacity uses: cm^2/molecule -> 1/m, given a
-      ! concentration in mol/m^3 supplied later.
+      ! cm^2/molecule -> m^2/mol, so that times mol/m^3 gives 1/m.
       rce%ray_fac(iband) = 1.e-4_f * CK_AVOGADRO * sig
     end do
 
@@ -688,12 +537,8 @@ contains
   end subroutine rce_destroy
 
 
-  !! The Parmentier (2015) adiabat, anchored at ``(t0, p0)``.
-  !!
-  !! Mirrors ``Carma.extend_atmosphere``'s ``new_T``, and is the closed-form
-  !! counterpart of the gradient the convective adjustment uses, so a profile
-  !! this module leaves neutrally stable is on the adiabat Python extended it
-  !! along. At ``p == p0`` this returns ``t0`` exactly.
+  !! The Parmentier (2015) adiabat through ``(t0, p0)``: the closed form of
+  !! the gradient PARM_A - PARM_B*T. Returns ``t0`` at ``p == p0``.
   pure function rce_adiabat(pres, t0, p0) result(temp)
 
     implicit none
@@ -714,10 +559,9 @@ contains
 
   !! Read the tabulated adiabatic gradient shipped with carmapy.
   !!
-  !! The file is the one ``carmapy.adiabat`` reads, passed by path rather than
-  !! copied into the run directory: '#' comment lines, then ``nt np``, the
-  !! log10 T axis, the log10 p axis, and the gradient as nt rows of np values.
-  !! A specific heat block follows it in the file and is not read.
+  !! Format: '#' comment lines, then ``nt np``, the log10 T axis, the log10 p
+  !! [bar] axis, and the gradient as nt rows of np values. The specific heat
+  !! block that follows is not read.
   subroutine rce_load_adiabat(path, rce, rc)
 
     implicit none
@@ -781,11 +625,7 @@ contains
 
 
   !! Tabulated adiabatic gradient d ln T / d ln p at ``(temp, pres)``.
-  !!
-  !! Bilinear in (log10 T, log10 p), clamped at the table edges -- the same
-  !! treatment ``carmapy.adiabat.grad_ad`` gives it, so the two agree wherever
-  !! they are both asked. Clamping is silent here; the Python side warns when
-  !! it builds the profile, which is where a user can act on it.
+  !! Bilinear in (log10 T, log10 p), silently clamped at the table edges.
   pure function rce_grad_ad(rce, temp, pres) result(grad)
 
     implicit none
@@ -862,14 +702,9 @@ contains
   end function rce_integrate_adiabat
 
 
-  !! The adiabatic temperature ratio across the pair of layers ``(iz, iz+1)``.
-  !!
-  !! ``exp(integral of grad_ad dlnp)`` across the pair, evaluated by the
-  !! midpoint rule: one gradient at the pair's mean temperature and the
-  !! geometric mean of its pressures. Exact where ``grad_ad`` is constant over
-  !! a layer spacing, second order otherwise, and it costs one interpolation
-  !! rather than an RK4 sweep -- which matters because the adjustment runs on
-  !! every timestep, not only on radiative solves.
+  !! The adiabatic temperature ratio across the pair of layers ``(iz, iz+1)``,
+  !! ``exp(integral of grad_ad dlnp)`` by the midpoint rule: one gradient at
+  !! the pair's mean temperature and geometric-mean pressure.
   !!
   !! Layer ``iz`` is the deeper of the two, so the result is >= 1.
   pure function rce_pfact(rce, tbar, p_lo, p_hi) result(pfact)
@@ -892,12 +727,7 @@ contains
   end function rce_pfact
 
 
-  !! The adiabatic gradient ``d ln T / d ln p`` of the run's own adiabat.
-  !!
-  !! The one place that knows how the two adiabats are selected between. The
-  !! tabulated branch is an interpolation and the analytic one a closed form,
-  !! so they are separate functions; everything that needs a gradient without
-  !! caring which model produced it comes through here.
+  !! The adiabatic gradient ``d ln T / d ln p`` of the selected adiabat.
   pure function rce_grad(rce, temp, pres) result(grad)
 
     implicit none
@@ -921,20 +751,14 @@ contains
   !!
   !! After Ray Pierrehumbert's scheme as implemented in Elspeth Lee's
   !! ``Exo-FMS_column_ck`` (``src/dry_conv_adj_mod.f90``, ``Ray_dry_adj``),
-  !! generalised from that code's constant ``kappa`` to the run's own adiabat
-  !! so the H2-dissociation flattening the tabulated gradient carries is not
-  !! thrown away in the deep atmosphere.
+  !! with that code's constant ``kappa`` replaced by the run's adiabat.
   !!
-  !! A pair of adjacent layers is unstable when the deeper one is hotter than
-  !! the adiabat through the shallower one allows. An unstable pair is mixed at
-  !! **fixed enthalpy** and placed exactly on the adiabat: the two assignments
-  !! below solve ``dp*T`` summed over the pair being unchanged together with
-  !! ``t(iz) = pfact*t(iz+1)``, which holds for any ``pfact`` and so survives
-  !! ``pfact`` depending on the temperatures being adjusted. Sweeping down and
-  !! then up propagates that through the column.
+  !! A pair is unstable when the deeper layer is hotter than the adiabat
+  !! through the shallower one allows. It is mixed at fixed enthalpy (sum of
+  !! ``dp*T`` over the pair) onto ``t(iz) = pfact*t(iz+1)``. Sweeps run down
+  !! and then up the column.
   !!
-  !! Arrays are bottom-to-top: layer ``iz`` sits below layer ``iz+1``, and
-  !! ``p(1)`` is the deepest.
+  !! Arrays are bottom-to-top: ``p(1)`` is the deepest layer.
   pure subroutine rce_conv_adj(rce, p, pl, t, is_conv, nz_rcb, nzone, resid)
 
     implicit none
@@ -988,10 +812,8 @@ contains
       if (.not. did_adj) exit
     end do
 
-    ! A neutrally stable zone no longer adjusts, so it cannot be recognised
-    ! from the sweeps. Both layers of every interface sitting on or above the
-    ! adiabat belong to a convective zone -- "above" because a pair the sweeps
-    ! did not have the budget to finish is still a convecting one.
+    ! Both layers of every interface on or above the adiabat are convective;
+    ! "above" covers pairs the sweeps did not finish.
     is_conv(:) = .false.
     neutral(:) = .false.
     resid      = 0._f
@@ -1010,29 +832,13 @@ contains
     end do
 
     ! ---- discard zones too thin to be convection --------------------------
-    ! Flags are set an interface at a time, so the shortest run expressible is
-    ! two layers -- which is also exactly what a grid-scale (2*dz) oscillation
-    ! in t manufactures: one interface made momentarily neutral by an
-    ! anomalously warm layer, with both its neighbours left strongly
-    ! subadiabatic. Measured on a real column: an isolated pair at 0.005 bar
-    ! sat at S = -4e-6 between interfaces at S = -6e-2, while genuine zones ran
-    ! 13 and 14 layers deep.
-    !
-    ! Keeping such a pair is not harmless bookkeeping. A layer marked
-    ! convective is taken out of the implicit temperature solve and given the
-    ! per-layer diagonal update instead, so the flag switches off the one
-    ! mechanism able to damp a coupled mode at the very layers carrying it, and
-    ! the oscillation that produced the flag is then sustained by it.
-    !
-    ! What joins two layers into one zone is therefore the *interface* between
-    ! them, not the fact that both carry a flag. A sawtooth flags every layer
-    ! it spans -- each one sits on a neutral interface with one neighbour --
-    ! but the interfaces alternate neutral and strongly stable, so by
-    ! interfaces it is a chain of two-layer islands and the purge below sees
-    ! it for what it is. Reading contiguity off the layer flags instead welds
-    ! those islands into a single deep zone that clears any length test.
+    ! A grid-scale (2*dz) oscillation makes isolated neutral interfaces. Left
+    ! flagged, those layers would leave the implicit solve, the one update
+    ! that damps such a mode. Zones are joined across neutral interfaces, not
+    ! flagged layers, so a sawtooth reads as a chain of two-layer islands.
     call rce_purge_thin_zones(nz, neutral, is_conv)
 
+    ! Count zones, again joined only across neutral interfaces.
     nzone = 0
     do iz = 1, nz
       if (.not. is_conv(iz)) cycle
@@ -1061,17 +867,8 @@ contains
   !! Clear the convective flag from any run shorter than CONV_MIN_LAYERS.
   !!
   !! A run extends from one layer to the next only across a neutral interface,
-  !! ``neutral(iz)`` describing the interface between layers ``iz`` and
-  !! ``iz+1``. Two flagged layers with a stably stratified interface between
-  !! them belong to different zones, however adjacent they are: convection
-  !! does not cross a stable interface, and a run that appears to is a
-  !! grid-scale oscillation wearing the flags of the neutral interfaces it
-  !! manufactured.
-  !!
-  !! Only the flags move. The temperatures are left exactly as the adjustment
-  !! sweeps left them, which is the right division of labour: a pair the sweeps
-  !! did not touch was never superadiabatic enough to mix, and unflagging it
-  !! only returns it to the radiative solve that should have been handling it.
+  !! ``neutral(iz)`` being the interface between layers ``iz`` and ``iz+1``.
+  !! Only the flags change; temperatures are left as the adjustment left them.
   pure subroutine rce_purge_thin_zones(nz, neutral, is_conv)
 
     implicit none
@@ -1109,50 +906,19 @@ contains
 
   !! Eddy diffusion from mixing length theory [cm^2/s].
   !!
-  !! A port of PICASO's ``get_kzz`` (``picaso/climate.py``), term for term, so
-  !! that a column here and a column there with the same profile mix the same
-  !! way. The mixing length velocity is set by the convective heat flux, and
-  !! the mixing length itself by how close the layer's lapse rate sits to the
-  !! adiabatic one:
+  !! Follows PICASO's ``get_kzz`` (``picaso/climate.py``):
   !!
   !!   Kzz = scalef * H * (l/H)^(4/3) * ( R * F_conv / (rho * Cp) )^(1/3)
   !!
   !! with ``l = kzz_mixl_scale * max(0.1, min(1, dlnT/dlnp / grad_ad)) * H``.
+  !! Evaluated in every layer; the floor on ``l/H`` leaves stable layers a
+  !! small residual Kzz.
   !!
-  !! ``kzz_mixl_scale`` is the scheme's only free parameter and is 1 for the
-  !! parameterisation as PICASO has it; everything else about ``l/H`` is
-  !! diagnosed from the profile. Kzz goes as ``l^(4/3)``, so a scale of ``f``
-  !! moves the whole profile by ``f^(4/3)``, not by ``f``.
+  !! The convective flux is the emergent flux less the layer's net radiative
+  !! flux, then limited by an overshoot floor, rescaled to put the internal
+  !! flux through the base, and floored at ``sigma*(0.05*t_int)^4``.
   !!
-  !! It is evaluated in every layer, not only the convective ones. The floor on
-  !! ``l/H`` is what makes that meaningful: a stably stratified layer keeps a
-  !! small residual Kzz rather than none at all, which is the behaviour the
-  !! parameterisation was built to have and what keeps the profile continuous
-  !! across a radiative-convective boundary that moves during the run.
-  !!
-  !! The convective flux is whatever the radiation is not carrying: the flux
-  !! emerging from the top of the column, less the net radiative flux in the
-  !! layer. Three pieces of conditioning follow it, all of them PICASO's: an
-  !! overshoot floor limiting how fast it may fall with height, a rescale
-  !! putting the imposed internal flux through the base of the column, and an
-  !! absolute floor at ``sigma*(0.05*t_int)^4``. The cube root magnifies
-  !! whatever is left near zero, so a flux that dips negative between solves
-  !! would otherwise be fatal rather than merely small.
-  !!
-  !! ``kzz_lapse_smooth`` optionally runs a centred mean over the lapse rate
-  !! before the mixing length is formed from it. PICASO smooths nothing; this is
-  !! here because on a real column the lapse ratio, not the flux, is what makes
-  !! Kzz spiky -- it is a finite difference of a discretised temperature
-  !! profile, and differencing amplifies whatever layer-to-layer structure the
-  !! radiative-convective solve leaves behind. Zero reproduces PICASO exactly.
-  !!
-  !! **Units.** cgs throughout, against the module's SI. ``ekz`` is a CARMA
-  !! input in cm^2/s and the parameterisation's constants are cgs, so
-  !! converting once at the boundary is cheaper to read than carrying the
-  !! conversion through six expressions.
-  !!
-  !! Arrays are bottom-to-top, so the flux sweeps run in the opposite direction
-  !! to PICASO's. ``kzz`` is returned on levels, where CARMA wants it.
+  !! cgs internally. Arrays are bottom-to-top; ``kzz`` is returned on levels.
   pure subroutine rce_kzz(rce, p, pl, t, fnet, kzz, rescale)
 
     implicit none
@@ -1166,16 +932,15 @@ contains
     !! What the convective flux had to be scaled by at the base of the column.
     real(kind=f), intent(out), optional :: rescale
 
-    integer      :: nz, iz, nwin
+    integer      :: nz, iz
     real(kind=f) :: chf(rce%nz), kz_lay(rce%nz), p_cgs(rce%nz)
-    real(kind=f) :: dtdp(rce%nz), dtdp_raw(rce%nz)
+    real(kind=f) :: dtdp(rce%nz)
     real(kind=f) :: r_atmos, cp_kzz, grav_cgs, f_sum, f_target, flx_min
     real(kind=f) :: grad_ad, lapse, mixl, scale_h, rho, fscale, w
 
     nz = rce%nz
 
-    ! The specific gas constant and the Cp the parameterisation was calibrated
-    ! with -- a diatomic ideal gas, deliberately not rce%cp. See KZZ_CP_OVER_R.
+    ! Specific gas constant, and the Cp of KZZ_CP_OVER_R (not rce%cp).
     r_atmos  = RGAS_CGS / rce%wtmol
     cp_kzz   = KZZ_CP_OVER_R * r_atmos
     grav_cgs = rce%grav / ACC_CGS2SI
@@ -1184,43 +949,27 @@ contains
       p_cgs(iz) = p(iz) * PA2BARYE
     end do
 
-    ! What the column is *actually* radiating, against what it is being asked
-    ! to radiate. The two are equal only in equilibrium, and their ratio is the
-    ! correction applied to the convective flux below.
+    ! Emergent flux, and the internal flux it equals in equilibrium.
     f_sum    = fnet(nz+1) * FLUX_SI2CGS
     f_target = SIGMA_SB_CGS * rce%t_int**4
     flx_min  = SIGMA_SB_CGS * (KZZ_TEFF_MIN * rce%t_int)**4
 
     ! ---- convective flux ---------------------------------------------------
-    ! What the radiation is not carrying. The net flux lives on levels, so it
-    ! is averaged onto the layer the divergence is taken across.
-    !
-    ! The deepest layer is taken to be carrying the whole flux convectively.
-    ! That is true of any well formed column, and it is what the sweep and the
-    ! rescale below both anchor on.
-    !
-    ! With an incident beam this departs from PICASO, which separates the
-    ! infrared net flux from the shortwave and works with the infrared alone.
-    ! Here they arrive summed in `fnet`, so a layer that absorbed sunlight
-    ! shows up as having less left for convection to carry -- the right sign,
-    ! but not the same decomposition.
+    ! What the radiation is not carrying, with the level net flux averaged
+    ! onto layers. The deepest layer carries the whole flux convectively.
+    ! fnet includes any shortwave; PICASO uses the infrared net flux alone.
     chf(1) = f_sum
     do iz = 2, nz
       chf(iz) = f_sum - 0.5_f * (fnet(iz) + fnet(iz+1)) * FLUX_SI2CGS
     end do
 
-    ! Convective overshoot: the flux may not fall faster with height than a
-    ! fixed fraction of the pressure ratio. The 1/3 is arbitrary, and lets the
-    ! flux fall somewhat faster than the pressure does.
+    ! Convective overshoot floor; see KZZ_CHF_FALL.
     do iz = 2, nz
       chf(iz) = max(chf(iz), &
                     KZZ_CHF_FALL * (p_cgs(iz) / p_cgs(iz-1)) * chf(iz-1))
     end do
 
-    ! Put the imposed internal flux through the base of the column, correcting
-    ! the layers above it by the same factor. Recorded because its departure
-    ! from one is how far the column is from the effective temperature it was
-    ! asked for -- a converged one rescales by exactly one.
+    ! Rescale every layer so the base carries the imposed internal flux.
     if (chf(1) > 0._f) then
       fscale = f_target / chf(1)
     else
@@ -1248,26 +997,12 @@ contains
       end if
     end do
 
-    ! Centred running mean, the window shrinking symmetrically towards each end
-    ! so the one-sided end derivatives come back unchanged. Applied here rather
-    ! than to the ratio below, since grad_ad contributes no noise of its own.
-    ! See the header for why the lapse rate is the term worth smoothing.
-    if (rce%kzz_lapse_smooth > 0 .and. nz > 2) then
-      dtdp_raw(:) = dtdp(:)
-      do iz = 1, nz
-        nwin = min(rce%kzz_lapse_smooth, iz - 1, nz - iz)
-        dtdp(iz) = sum(dtdp_raw(iz-nwin:iz+nwin)) / real(2 * nwin + 1, f)
-      end do
-    end if
-
     do iz = 1, nz
       grad_ad = max(rce_grad(rce, t(iz), p(iz)), GRAD_AD_MIN)
       lapse   = min(1._f, dtdp(iz) / grad_ad)
 
       scale_h = r_atmos * t(iz) / grav_cgs
-      ! The scale multiplies the mixing length after the floor, so it applies
-      ! uniformly to convective and stable layers alike rather than moving the
-      ! floor out from under the stable ones.
+      ! kzz_mixl_scale applies after the floor, to stable layers too.
       mixl    = rce%kzz_mixl_scale * max(KZZ_MIXL_MIN, lapse) * scale_h
       rho     = p_cgs(iz) / (r_atmos * t(iz))
 
@@ -1276,10 +1011,8 @@ contains
     end do
 
     ! ---- onto the levels ---------------------------------------------------
-    ! Linear in (ln Kzz, ln p), which is how Kzz is read and plotted, and held
-    ! at the end layers' values on the two boundary levels. Kzz spans orders of
-    ! magnitude, so extrapolating off the end of the column is not defensible
-    ! even across a single half-layer.
+    ! Linear in (ln Kzz, ln p); the boundary levels take the end layers'
+    ! values rather than extrapolating.
     kzz(1)    = kz_lay(1)
     kzz(nz+1) = kz_lay(nz)
 
@@ -1332,11 +1065,9 @@ contains
   end subroutine rce_level_temps
 
 
-  !! Recompute the altitude grid hydrostatically for the current temperature.
-  !!
-  !! Ports ``Carma.calculate_z``. For ``I_LOGP`` the grid is a function of
-  !! pressure and the bottom scale height only, so it does not move as
-  !! temperature evolves and this routine leaves it untouched.
+  !! Recompute the altitude grid hydrostatically for the current temperature,
+  !! as ``Carma.calculate_z`` does. Only ``I_CART`` grids depend on
+  !! temperature; any other grid is left untouched.
   subroutine rce_regrid_z(nz, igridv, pl, tl, wtmol, grav, zc, zl)
 
     implicit none
@@ -1373,9 +1104,8 @@ contains
   !! Total cloud geometric cross-section per unit area of the column,
   !! ``sum_z sum_bin sum_group numden * pi * r^2 * dz``.
   !!
-  !! A cheap proxy for how much the cloud field's opacity has moved since the
-  !! last solve. Absolute normalisation is irrelevant -- only the relative
-  !! change is used.
+  !! A proxy for the change in cloud opacity since the last solve; only its
+  !! relative change is used, so the factor of pi is omitted.
   pure function cloud_xsec(nz, nbin, ngroup, numden, radius, dz) result(xsec)
 
     implicit none
@@ -1426,31 +1156,21 @@ contains
 
     call rce_fluxes(rce, p, pl, t, rce%fnet, rce%tau_num, rce%tau_den)
 
-    ! The internal flux is a boundary condition, not something to be inferred:
-    ! the net flux through the base of the column is sigma*t_int^4 by
-    ! definition. toon_lw_column's gas-giant lower boundary extrapolates it
-    ! from the deep Planck gradient instead, which is only right once the deep
-    ! profile already is. Imposing it makes F_TOA == sigma*t_int^4 the fixed
-    ! point of the column's energy budget, which is what the convective
-    ! adjustment then transports the flux to satisfy.
+    ! Impose the internal flux at the base, overriding toon_lw_column's
+    ! extrapolated lower boundary.
     rce%fnet(1) = SIGMA_SB * rce%t_int ** 4
 
     ! ---- flux divergence -> heating rate ----------------------------------
     do iz = 1, nz
-      ! The layer's mass per unit area. Hydrostatic balance makes this exact,
-      ! where rho*dz is only exact in the limit of thin layers -- they differ
-      ! by (dlnp)^2/24, which is 0.7% at a layer spacing of 0.4 in ln p. It
-      ! has to be the exact one, because the convective adjustment redistributes
-      ! enthalpy weighted by dp and any mismatch between the two measures
-      ! shows up as the column gaining or losing energy in the handoff.
+      ! Mass per unit area from dp/g rather than rho*dz, so the heating is
+      ! consistent with the dp-weighted enthalpy of the convective adjustment.
       dmass = (pl(iz) - pl(iz+1)) / rce%grav
 
       rce%dtdt(iz) = -(rce%fnet(iz+1) - rce%fnet(iz)) / (dmass * rce%cp)
 
-      ! Local radiative time constant: the layer's heat capacity per unit area
-      ! over how fast its own emission responds to a temperature change. Used
-      ! only to stabilise the update in rce_update, never as a physical
-      ! result, so the effective emissivity is the usual grey estimate.
+      ! Local radiative time constant, heat capacity over 4*sigma*T^3*emiss,
+      ! with a grey emissivity from the Planck-weighted optical depth. Used
+      ! only to damp the update.
       if (rce%tau_den(iz) > 0._f) then
         tau_mean = rce%tau_num(iz) / rce%tau_den(iz)
       else
@@ -1472,23 +1192,12 @@ contains
   end subroutine rce_solve
 
 
-  !! Net flux at every level for a given temperature profile.
-  !!
-  !! Split out of ``rce_solve`` so ``rce_jacobian`` can evaluate it on a
-  !! perturbed profile without disturbing any held state. Everything that
-  !! depends on temperature is recomputed here from ``t``: the level
-  !! temperatures the Planck source is built from, and the gas opacity.
-  !! ``dz`` deliberately is not -- the altitude grid is regridded once per
-  !! step, after the update, so within a step it is a constant and a
-  !! temperature perturbation must not move it.
   !! Cloud optical depth, single-scattering albedo and asymmetry on the band
   !! centres, for the cloud field currently in ``rce%numden_grp``.
   !!
-  !! Separate from ``rce_fluxes`` because none of it depends on temperature.
-  !! ``rce_jacobian`` perturbs one layer at a time and would otherwise rebuild
-  !! an identical answer for each of its ``2*nz`` flux evaluations. Run this
-  !! once per cloud field, before any flux evaluation that reads ``rce%tau_c``,
-  !! ``rce%w0_c`` or ``rce%g_c``.
+  !! Independent of temperature, so it runs once per cloud field rather than
+  !! inside ``rce_fluxes``. Must run before any flux evaluation that reads
+  !! ``rce%tau_c``, ``rce%w0_c`` or ``rce%g_c``.
   subroutine rce_optics_prep(rce, radius, qext, ssa, asym)
 
     implicit none
@@ -1515,6 +1224,10 @@ contains
   end subroutine rce_optics_prep
 
 
+  !! Net flux at every level for a given temperature profile. Called by
+  !! ``rce_solve``, and by ``rce_jacobian`` on perturbed profiles. Level
+  !! temperatures and gas opacity are recomputed from ``t``; ``dz`` is held
+  !! fixed within a step.
   subroutine rce_fluxes(rce, p, pl, t, fnet, tau_num, tau_den)
 
     implicit none
@@ -1529,8 +1242,7 @@ contains
     real(kind=f), intent(out) :: tau_den(rce%nz)  !! ... and its denominator
 
     integer      :: nz, nlev, iz, iband, ig, iw
-    !! Per-point column workspace. Local, so each thread of the spectral loop
-    !! below gets its own.
+    !! Per-point column workspace, private to each thread.
     real(kind=f) :: dtau_l(rce%nz), w0_l(rce%nz), g_l(rce%nz)
     real(kind=f) :: fup_l(rce%nz+1), fdn_l(rce%nz+1)
     real(kind=f) :: swup_l(rce%nz+1), swdn_l(rce%nz+1)
@@ -1557,9 +1269,6 @@ contains
     call ck_kappa_column(rce%ck, p, t, conc, rce%beta)
 
     ! ---- band-integrated Planck at every level, and every layer -----------
-    ! The layer values are what each layer emits from; the level values give
-    ! the solver the gradient across it. Both are needed because `tl` is an
-    ! interpolation of `t` and so is blind to a layer-to-layer oscillation.
     !$OMP PARALLEL DO PRIVATE(iband, iz) SCHEDULE(static)
     do iband = 1, rce%nband
       do iz = 1, nlev
@@ -1577,8 +1286,8 @@ contains
     end do
     !$OMP END PARALLEL DO
 
-    ! No incident radiation: the top boundary is the auto-emission branch with
-    ! the factor that reproduces PICASO's, in top-down pressure terms.
+    ! No incident longwave at the top: the auto-emission boundary with
+    ! PICASO's factor, in top-down pressure terms.
     btop_factor = pl(nlev) / (pl(nlev-1) - pl(nlev))
 
     ! ---- solve every spectral point ---------------------------------------
@@ -1592,15 +1301,9 @@ contains
 
     rce%sw_hit(:) = .false.
 
-    ! One iteration per spectral point. The (iband, ig) nest is flattened so all
-    ! nband*ng points are balanced in one go; each iteration writes only its own
-    ! column of the per-point arrays, which are summed in index order after the
-    ! loop.
-    !
-    ! A static schedule rather than SCHEDULE(runtime): every point solves the
-    ! same size column for the same cost, so there is nothing for a dynamic
-    ! schedule to rebalance, and taking OMP_SCHEDULE here would tie this loop to
-    ! whatever value the far more schedule-sensitive loop in newstate.F90 wants.
+    ! One iteration per spectral point (iband, ig flattened). Each writes only
+    ! its own column of the per-point arrays. Static schedule, since every
+    ! point costs the same; OMP_SCHEDULE is left to the loop in newstate.F90.
     !$OMP PARALLEL DO &
     !$OMP& PRIVATE(iband, ig, iz, tau_gas, tau_ray, tau_cld, tau_tot, &
     !$OMP&         tau_sca, dtau_l, w0_l, g_l, fup_l, fdn_l, &
@@ -1613,11 +1316,8 @@ contains
         do iz = 1, nz
           tau_gas = rce%beta(iw, iz) * rce%dz(iz)
 
-          ! Rayleigh scattering by the gas. Only assembled when there is a
-          ! beam to scatter: it falls as lambda^-4, so in the thermal infrared
-          ! it is five orders of magnitude below the optical and contributes
-          ! nothing, while leaving it out of an unirradiated run keeps such a
-          ! run bit-for-bit what it was before the shortwave existed.
+          ! Rayleigh scattering, only with an incident beam; it is negligible
+          ! in the thermal infrared.
           if (rce%sw_on) then
             tau_ray = rce%ray_fac(iband) * conc(iz) * rce%dz(iz)
           else
@@ -1629,24 +1329,19 @@ contains
 
           dtau_l(iz) = tau_tot
 
-          ! Scattering optical depth: the cloud's scattering part plus all of
-          ! the Rayleigh, which is conservative.
+          ! Scattering optical depth: cloud scattering plus all of Rayleigh.
           tau_sca = tau_cld * rce%w0_c(iband, iz) + tau_ray
 
           if (tau_tot > 0._f) then
-            ! Gas absorption does not scatter, so the scatterers are the cloud
-            ! and the Rayleigh term.
             w0_l(iz) = tau_sca / tau_tot
           else
             w0_l(iz) = 0._f
           end if
-          ! The two-stream coefficients are singular at w0 == 1 exactly, which
-          ! a non-absorbing grain in a transparent band can reach.
+
+          ! The two-stream coefficients are singular at w0 == 1.
           w0_l(iz) = min(w0_l(iz), 1._f - 1.e-12_f)
 
-          ! Asymmetry is a scattering-weighted mean. Rayleigh is isotropic and
-          ! so enters with g = 0, dragging the column's asymmetry down wherever
-          ! it competes with the forward-peaked cloud.
+          ! Scattering-weighted asymmetry; Rayleigh enters with g = 0.
           if (tau_sca > 0._f) then
             g_l(iz) = tau_cld * rce%w0_c(iband, iz) &
                       * rce%g_c(iband, iz) / tau_sca
@@ -1654,8 +1349,7 @@ contains
             g_l(iz) = 0._f
           end if
 
-          ! Held for the Planck-weighted mean optical depth, which the
-          ! reduction below forms.
+          ! For the Planck-weighted mean optical depth.
           rce%tautot_w(iz, iw) = tau_tot
         end do
 
@@ -1669,13 +1363,9 @@ contains
         end do
 
         ! ---- the incident beam, into the same net flux --------------------
-        ! Accumulating shortwave into `fnet` rather than tracking it apart is
-        ! what keeps the rest of this module unchanged. In equilibrium the
-        ! longwave carries sigma*t_int^4 + absorbed upward at the top while the
-        ! shortwave net there is -absorbed, so the two cancel and
-        ! `fnet(top) == sigma*t_int^4` remains the condition to converge on,
-        ! exactly as for an isolated object. The heating rate picks up
-        ! shortwave absorption for free, being a divergence of this same array.
+        ! In equilibrium the longwave carries sigma*t_int^4 + absorbed upward at
+        ! the top and the shortwave net is -absorbed, so fnet(top) ==
+        ! sigma*t_int^4 remains the equilibrium condition.
         if (rce%sw_on) then
           if (rce%f0(iband) > 0._f) then
             call toon_sw_column(nz, rce%f0(iband), rce%mu_lev, &
@@ -1695,8 +1385,7 @@ contains
     end do
     !$OMP END PARALLEL DO
 
-    ! Sum in spectral-point order, which is the order the points were visited
-    ! in before the loop was threaded.
+    ! Sum in spectral-point order, independent of the thread layout.
     do iw = 1, rce%nwave
       iband = (iw - 1) / rce%ng + 1
       wt    = rce%ck%weights(iw)
@@ -1721,8 +1410,7 @@ contains
       end if
     end do
 
-    ! What the column kept, and what it sent back. Both are diagnostics: the
-    ! energy is already in `fnet`.
+    ! Diagnostics only; the energy is already in fnet.
     rce%absorbed_sw  = sw_top - sw_bot
     rce%reflected_sw = sw_ref
 
@@ -1730,37 +1418,16 @@ contains
   end subroutine rce_fluxes
 
 
-  !! Jacobian of the heating rate, ``jac(i,k) = d(dTdt_i)/dT_k`` [1/s].
+  !! Jacobian of the heating rate, ``jac(i,k) = d(dTdt_i)/dT_k`` [1/s], by
+  !! centred finite differences on the full flux solve.
   !!
-  !! A per-layer damping can only see the diagonal -- how a layer responds to
-  !! its own temperature. That makes the update a Jacobi sweep: every layer
-  !! jumps to the equilibrium it would have if its neighbours held still, and
-  !! since they all move at once they overshoot together. The off-diagonals are
-  !! the coupling that makes them not independent.
+  !! Dense: in the upper atmosphere a band of half-width 1 holds only about
+  !! half of ``sum_j |dH_j/dT_k|``, and half-width 16 about 94%. With level
+  !! temperatures interpolated from layers, perturbing a layer also warms the
+  !! levels it shares with its neighbours, so the nearest off-diagonals have
+  !! the opposite sign to radiative exchange.
   !!
-  !! **Measured, not derived.** Differentiating the two-stream solution
-  !! analytically means committing to a linearisation of the whole chain --
-  !! opacity, Planck source, boundary terms -- and a wrong one is not obviously
-  !! wrong. Finite differences on the real solver cannot fail in that way.
-  !!
-  !! **Dense, because it was measured to be.** The fraction of
-  !! ``sum_j |dH_j/dT_k|`` captured by a band of half-width w on this column:
-  !!
-  !!     p [bar]    w=1     w=2     w=4     w=8    w=16
-  !!       22.5    0.517   0.999   1.000   1.000   1.000
-  !!       0.111   0.518   0.670   0.790   0.884   0.939
-  !!       0.0058  0.528   0.669   0.773   0.860   0.936
-  !!
-  !! A tridiagonal keeps about half the operator at every depth and never
-  !! saturates. It also gets the sign of what it keeps backwards: perturbing a
-  !! layer raises the levels it shares with its neighbours, so their Planck
-  !! source rises and they *cool*, where genuine exchange would warm them. That
-  !! is a property of this layer-to-level reconstruction, not of radiative
-  !! transfer -- a different vertical scheme needs the measurement redone. See
-  !! ``tests/integration/test_rce.py::test_jacobian_bandwidth``.
-  !!
-  !! Cost is ``2*nz`` flux evaluations, so this runs on its own slow cadence
-  !! rather than on every solve; see ``rce_update``.
+  !! Costs ``2*nz`` flux evaluations, so it runs on its own cadence.
   subroutine rce_jacobian(rce, p, pl, t)
 
     implicit none
@@ -1777,8 +1444,7 @@ contains
 
     do k = 1, nz
 
-      ! Centred, not one-sided: the heating goes as T^4, so a one-sided
-      ! difference carries a first-order bias that a centred one cancels.
+      ! Centred difference, since the heating goes as T^4.
       rce%t_pert(:) = t(:)
       rce%t_pert(k) = t(k) + JAC_DT
       call rce_fluxes(rce, p, pl, rce%t_pert, &
@@ -1788,8 +1454,7 @@ contains
       call rce_fluxes(rce, p, pl, rce%t_pert, &
                       rce%fnet_minus, rce%tnum_pert, rce%tden_pert)
 
-      ! The base flux is imposed, not solved for, so it does not respond to a
-      ! temperature perturbation and neither does layer 1's heating through it.
+      ! The base flux is imposed and does not respond to temperature.
       rce%fnet_pert(1)  = rce%fnet(1)
       rce%fnet_minus(1) = rce%fnet(1)
 
@@ -1814,9 +1479,6 @@ contains
 
   !! Thomas algorithm for a tridiagonal system, with the sub- and
   !! super-diagonals given as full-length arrays (``a(1)`` and ``c(n)`` unused).
-  !!
-  !! Kept local rather than shared with ``carma_rtsolve``'s copy so the
-  !! validated solver is not touched.
   pure subroutine rce_tridiag(n, a, b, c, d, x, ok)
 
     implicit none
@@ -1860,21 +1522,15 @@ contains
   end subroutine rce_tridiag
 
 
-
   !! Advance the column's temperature and altitude grid by one timestep.
   !!
   !! Called once per microphysical step, before ``CARMASTATE_Create``. A full
-  !! radiative transfer solve happens only when one of the cadence triggers
-  !! fires; the heating rate from the most recent solve is applied on every
-  !! call, so temperature evolves continuously. The convective adjustment runs
-  !! on every call too -- it is cheap, and leaving a superadiabatic profile
-  !! standing between solves would feed the microphysics a column that is not
-  !! one the model believes in.
+  !! radiative solve runs only when a cadence trigger fires; the held heating
+  !! rate and the convective adjustment are applied on every call.
   !!
-  !! ``numden`` is indexed by element, as the driver holds it. Only the number
-  !! element of each group carries a number concentration -- core-mass elements
-  !! are a mass concentration in the same array -- so ``elem_is_number``
-  !! selects the right one.
+  !! ``numden`` is indexed by element; ``elem_is_number`` selects the number
+  !! element of each group, since core-mass elements hold a mass
+  !! concentration.
   subroutine rce_update(rce, dtime, p, pl, t, zc, zl, &
                         nelem, numden, elem2group, elem_is_number, &
                         radius, qext, ssa, asym)
@@ -1903,11 +1559,9 @@ contains
     integer      :: nz, iz, iz_top, ibin, ielem, igroup
     real(kind=f) :: dz_cm(rce%nz), damp(rce%nz)
     real(kind=f) :: xsec, dt_eff, dt0, dt_lay
-    real(kind=f) :: dt_col(rce%nz), rhs(rce%nz), sol(rce%nz), dt_cap
+    real(kind=f) :: dt_col(rce%nz), rhs(rce%nz), sol(rce%nz)
     real(kind=f) :: kzz_new(rce%nz+1), rescale_new
-    real(kind=f) :: heat_deep, capt_deep, x_deep
-    real(kind=f) :: hcap(rce%nz), e_pre, cz, jz
-    integer      :: k
+    real(kind=f) :: hcap(rce%nz), e_pre
     integer      :: rad_idx(rce%nz), nrad, i, j
     logical      :: dense_ok, do_jac
     logical      :: do_solve
@@ -1950,24 +1604,17 @@ contains
 
       call rce_solve(rce, p, pl, t)
 
-      ! Eddy diffusion rides on the same cadence: it is a function of the
-      ! convective flux, which is only meaningful against a fresh fnet. Taken
-      ! through locals because rce_kzz reads the column it is given and so
-      ! takes rce by intent(in), which its own outputs may not alias.
+      ! Through locals, since rce_kzz takes rce as intent(in).
       if (rce%kzz_mode == I_KZZ_MIXING_LENGTH) then
         call rce_kzz(rce, p, pl, t, rce%fnet, kzz_new, rescale_new)
         rce%kzz(:)     = kzz_new(:)
         rce%kzz_rescale = rescale_new
       end if
 
-      ! The Jacobian costs 2*nz flux evaluations against the solve's one, so it
-      ! gets its own, much slower trigger: it describes how the column responds
-      ! to temperature, which changes far more slowly than the heating rate
-      ! itself. Re-measured when it has never been measured, when it is stale by
-      ! count, or when the profile has moved far enough that it no longer
-      ! describes this column.
+      ! Re-measure the Jacobian if it has never been measured, is older than
+      ! JAC_GAP solves, or the profile has drifted by more than JAC_DRIFT_MAX.
       do_jac = .not. rce%have_jac
-      if (.not. do_jac) do_jac = rce%jac_age >= rce%jac_gap
+      if (.not. do_jac) do_jac = rce%jac_age >= JAC_GAP
       if (.not. do_jac .and. rce%jac_age >= JAC_GAP_MIN) then
         do_jac = maxval(abs(t - rce%t_jac)) > JAC_DRIFT_MAX
       end if
@@ -1987,35 +1634,18 @@ contains
     ! ---- apply the held heating rate to every layer -----------------------
     dt_eff = dtime * rce%accel
 
-    ! Backward Euler on the coupled column:
+    ! Backward Euler on the coupled column,
     !
-    !   (C_i/dt) dT_i - sum_k J_ik dT_k = C_i * dtdt_i
+    !   (C_i/dt) dT_i - sum_k J_ik dT_k = C_i * dtdt_i,
     !
-    ! with J the dense Jacobian of the heating rate. Dividing through by the
-    ! layer's heat capacity leaves the system below in units of 1/s.
+    ! with J the dense Jacobian, divided through by C_i. With J diagonal this
+    ! is the per-layer damping dT = dtdt*dt_eff/(1 + dt_eff/tau_rad); as
+    ! dt_eff grows it tends to the Newton step dT = -J^-1 dtdt. The fixed point
+    ! dtdt = 0 is unchanged.
     !
-    ! With the off-diagonals zeroed this reduces algebraically to the per-layer
-    ! damping it replaces, dT = dtdt*dt_eff/(1 + dt_eff/tau_rad), since the
-    ! diagonal of J is what tau_rad estimates. The off-diagonals are the whole
-    ! point: without them each layer relaxes to its own equilibrium holding its
-    ! neighbours fixed, which is a Jacobi sweep and oscillates.
-    !
-    ! As dt_eff grows this becomes dT = -J^-1 dtdt, which is Newton's method
-    ! for the steady state. accel is therefore the continuation parameter
-    ! between a near-explicit step and a full Newton step, not a separate
-    ! acceleration hack.
-    !
-    ! In a radiative layer the fixed point is untouched -- dT = 0 requires
-    ! dtdt = 0 whatever J is -- so this changes only the approach to it.
-    !
-    ! The system is solved over the radiative layers only, rows and columns
-    ! both. A convective zone is handled separately below, so its rows must not
-    ! appear in the right-hand side here: the coupling would carry the zone's
-    ! dtdt into the radiative layers beside it, and overwriting the zone's own
-    ! rows afterwards would leave that behind -- measured at 2.6e-4 in the
-    ! emergent flux, and it does not shrink with more steps. Dropping the zone's
-    ! rows and columns treats it as a fixed boundary, which is what handling it
-    ! separately means.
+    ! Solved over the radiative layers only, rows and columns both, so the
+    ! convective zones stepped below act as a fixed boundary and their dtdt is
+    ! not carried into neighbouring radiative layers.
     dense_ok  = rce%have_jac
     dt_col(:) = 0._f
 
@@ -2033,10 +1663,8 @@ contains
           do i = 1, nrad
             rce%lu(i,j) = -dt_eff * rce%jac(rad_idx(i), rad_idx(j))
           end do
-          ! Levenberg damping. The measured diagonal is genuinely positive in
-          ! the upper atmosphere, where a layer carrying far more flux than it
-          ! emits absorbs more of the through-beam as it warms, so it is not
-          ! sign-clipped -- lambda is what keeps such a row solvable.
+          ! Levenberg damping. The diagonal of J can be positive in the upper
+          ! atmosphere and is not sign-clipped.
           rce%lu(j,j) = rce%lu(j,j) + 1._f + rce%lambda
           rhs(j)      = dt_eff * rce%dtdt(rad_idx(j))
         end do
@@ -2047,8 +1675,7 @@ contains
           call lu_solve(nrad, rce%lu(1:nrad,1:nrad), rce%piv(1:nrad), &
                         rhs(1:nrad), sol(1:nrad))
 
-          ! A measured Jacobian can be poor where the column is optically thin
-          ! enough that a layer barely talks to anything.
+          ! Reject a NaN solution.
           if (any(sol(1:nrad) /= sol(1:nrad))) dense_ok = .false.
         end if
 
@@ -2066,37 +1693,18 @@ contains
                      / (1._f + dt_eff / rce%tau_rad(iz))
       end do
       rce%nfallback = rce%nfallback + 1
-      ! Raise the damping so the next attempt is closer to the diagonal step
-      ! that just had to be substituted anyway.
+
+      ! Raise the damping for the next attempt.
       rce%lambda = max(2._f * rce%lambda, LAMBDA_MIN)
     else
       rce%lambda = rce%lambda * LAMBDA_DECAY
       if (rce%lambda < LAMBDA_MIN) rce%lambda = 0._f
     end if
 
-    ! Convective layers keep the per-layer damping they had before, made
-    ! uniform within each zone; only radiative layers take the implicit step.
-    !
-    ! Not conservatism: the implicit step cannot be rescaled to sit inside a
-    ! zone. A radiative layer reaches equilibrium on its own, at dtdt == 0, so
-    ! any positive factor leaves that fixed point alone. A convective zone does
-    ! not -- it equilibrates collectively, when the flux entering its base
-    ! equals the flux leaving its top, with individual layers still heating and
-    ! cooling against the mixing. That balance is a dp-weighted sum over the
-    ! zone, so a factor varying from layer to layer reweights it and moves the
-    ! equilibrium rather than only the approach to it: measured at 2.6e-4 in
-    ! the emergent flux, and it does not shrink with more steps.
-    !
-    ! Collapsing the zone onto a single factor is what fixes that, and it needs
-    ! the step to be a positive multiple of dtdt. The coupled step is not --
-    ! the off-diagonals can give a layer a dT opposing its own dtdt, which is
-    ! the whole point of them -- so there is no factor to take. The zone gets
-    ! a diagonal update instead: one positive factor per zone, chosen by
-    ! zone_damp below.
-    !
-    ! The oscillation the implicit step exists to cure lives in the radiative
-    ! upper atmosphere, where the layers are optically thin and exchange
-    ! strongly, so this gives it up exactly where it was not needed.
+    ! Convective zones take a diagonal update with one damping factor per
+    ! zone, the fastest layer's. A zone equilibrates collectively, when its
+    ! dp-weighted net heating is zero, so a factor varying across its layers
+    ! would move that equilibrium rather than only the approach to it.
     do iz = 1, nz
       damp(iz) = 1._f / (1._f + dt_eff / rce%tau_rad(iz))
       hcap(iz) = (pl(iz) - pl(iz+1)) / rce%grav * rce%cp
@@ -2115,33 +1723,8 @@ contains
         iz_top = iz_top + 1
       end do
 
-      ! A mixed zone exchanges radiation internally and loses heat only
-      ! through its edges, so its collective relaxation is slower than its
-      ! thinnest layer's. Damping the whole zone at the thinnest layer's rate
-      ! slows the zone's clock, which a fixed point does not see but a
-      ! cycling column does: the zone then never applies part of the heating
-      ! the solves computed for it. zone_damp = 1 takes the factor from the
-      ! zone's own response to a uniform warming instead.
-      ! LLM-GENERATED — UNVERIFIED (tier: physics)
-      if (rce%zone_damp == 1 .and. rce%have_jac) then
-        cz = sum(hcap(iz:iz_top))
-        jz = 0._f
-        do i = iz, iz_top
-          do k = iz, iz_top
-            jz = jz + hcap(i) * rce%jac(i, k)
-          end do
-        end do
-        jz = jz / cz
-        if (jz < 0._f) then
-          damp(iz:iz_top) = 1._f / (1._f - dt_eff * jz)
-        else
-          ! A zone whose collective heating grows with temperature has no
-          ! implicit factor to give; keep the fastest layer's damping.
-          damp(iz:iz_top) = minval(damp(iz:iz_top))
-        end if
-      else
-        damp(iz:iz_top) = minval(damp(iz:iz_top))
-      end if
+      damp(iz:iz_top) = minval(damp(iz:iz_top))
+
       iz = iz_top + 1
     end do
 
@@ -2151,42 +1734,35 @@ contains
       end if
     end do
 
-    ! Trust region: if the step is too big, scale the *whole vector* rather
-    ! than clipping layer by layer. A Newton step is a direction; clipping
-    ! individual entries changes that direction into one nothing computed, and
-    ! silently discards the difference -- which is how the old per-layer clamp
-    ! came to destroy 823 kW/m^2 while reporting a converged-looking flux. A
-    ! uniform scale is still a descent step, just a shorter one.
-    !
-    ! The radius is the tighter of the trust radius, which always applies, and
-    ! the user's dt_max, which a run may disable. The linear model is only
-    ! local: far from equilibrium it will confidently predict a step of
-    ! thousands of kelvin.
+    ! Trust region: scale the whole step vector, rather than clipping layer by
+    ! layer, so the step keeps its direction.
     dt_lay = 0._f
     do iz = 1, nz
       dt_lay = max(dt_lay, abs(dt_col(iz)))
     end do
 
-    dt_cap = min(DT_TRUST, rce%dt_max)
-
-    if (dt_lay > dt_cap .and. dt_lay > 0._f) then
-      dt_col(:) = dt_col(:) * (dt_cap / dt_lay)
-      dt_lay    = dt_cap
+    if (dt_lay > DT_TRUST) then
+      dt_col(:) = dt_col(:) * (DT_TRUST / dt_lay)
+      dt_lay    = DT_TRUST
       rce%nclamp = rce%nclamp + 1
-      ! A step that had to be cut back means the linear model overreached, so
-      ! lean towards the diagonal next time.
+
+      ! The linear model overreached; raise the damping.
       rce%lambda = max(2._f * rce%lambda, LAMBDA_MIN)
     end if
 
+    ! ---- energy budget diagnostics ----------------------------------------
     rce%e_comp = rce%e_comp + dt_eff * sum(hcap(:) * rce%dtdt(:))
     rce%e_appl = rce%e_appl + sum(hcap(:) * dt_col(:))
+
     if (.not. allocated(rce%e_comp_z)) then
       allocate(rce%e_comp_z(nz), rce%e_appl_z(nz))
       rce%e_comp_z(:) = 0._f
       rce%e_appl_z(:) = 0._f
     end if
+
     rce%e_comp_z(:) = rce%e_comp_z(:) + dt_eff * hcap(:) * rce%dtdt(:)
     rce%e_appl_z(:) = rce%e_appl_z(:) + hcap(:) * dt_col(:)
+
     do iz = 1, nz
       if (rce%is_conv(iz)) then
         rce%e_comp_cnv = rce%e_comp_cnv + dt_eff * hcap(iz) * rce%dtdt(iz)
@@ -2196,36 +1772,6 @@ contains
         rce%e_appl_rad = rce%e_appl_rad + hcap(iz) * dt_col(iz)
       end if
     end do
-
-    ! ---- deep-interior acceleration ----------------------------------------
-    ! The base-connected zone takes (accel_deep - 1) times its own net heating
-    ! on top of the step above, spread as a uniform shift in ln T. With a
-    ! constant adiabatic gradient that shift keeps an adiabat an adiabat; the
-    ! fitted gradient falls with T, so warming leaves each interface slightly
-    ! superadiabatic (and cooling slightly subadiabatic), which the adjustment
-    ! then repairs. The extra enthalpy therefore mostly stays where it was put
-    ! rather than being carried up the zone by the adjustment.
-    ! Applied after the trust region and outside dt_lay, so the solve cadence
-    ! is that of the unaccelerated column.
-    ! LLM-GENERATED — UNVERIFIED (tier: physics)
-    if (rce%accel_deep /= 1._f .and. rce%nz_rcb > 0) then
-      heat_deep = 0._f
-      capt_deep = 0._f
-      do iz = 1, rce%nz_rcb
-        heat_deep = heat_deep + (pl(iz) - pl(iz+1)) * dt_col(iz)
-        capt_deep = capt_deep + (pl(iz) - pl(iz+1)) * t(iz)
-      end do
-      if (capt_deep > 0._f) then
-        x_deep = (rce%accel_deep - 1._f) * heat_deep / capt_deep
-        ! A backstop on the relative step, far above what a spin-up uses
-        ! (~1e-4), so a held heating rate cannot run the zone away.
-        x_deep = sign(min(abs(x_deep), 1.e-2_f), x_deep)
-        do iz = 1, rce%nz_rcb
-          dt_col(iz) = dt_col(iz) + t(iz) * x_deep
-        end do
-        rce%e_deep = rce%e_deep + x_deep * sum(hcap(1:rce%nz_rcb) * t(1:rce%nz_rcb))
-      end if
-    end if
 
     do iz = 1, nz
       t(iz) = t(iz) + dt_col(iz)

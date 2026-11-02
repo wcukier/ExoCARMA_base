@@ -130,8 +130,7 @@ subroutine rhopart(carma, cstate, rc)
       ! Determine the weight percent of sulfate, and store it for later use.
       if (irhswell(igroup) == I_WTPCT_H2SO4) then
         gc_cgs     = gc(iz, igash2so4) / (xmet(iz) * ymet(iz) * zmet(iz))
-        ! Water vapor pressure computed directly (vapor pressures are stored
-        ! per condensate group, and a water group need not exist here).
+        ! Vapor pressures are stored per group; water need not be a group here.
         call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
         wtpct(iz)  = wtpct_tabaz(carma, t(iz), gc_cgs, pvap_h2o_liq, rc)
         if (rc < 0) return

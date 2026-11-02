@@ -122,15 +122,13 @@ subroutine setupgkern(carma, cstate, rc)
     return
   end if
 
-  ! Air density for each gas column (same for all gases; kept per gas for
-  ! use in the Schmidt number below).
+  ! This is <rhoa> in cgs units, per gas column.
   do igas = 1, NGAS
     rhoa_cgs(:, igas) = rhoa(:) / (xmet(:)*ymet(:)*zmet(:))
   end do
 
-  ! Kelvin curvature factor, surface tension, and desorption energy are
-  ! properties of each condensate (group); several groups may share one gas
-  ! reservoir with different condensate thermodynamics.
+  ! Kelvin curvature factor, surface tension, and desorption energy of each
+  ! condensate (group).
   do igroup = 1, NGROUP
     ielem = ienconc(igroup)
     igas = igrowgas(ielem)
@@ -208,13 +206,8 @@ subroutine setupgkern(carma, cstate, rc)
   ! Loop over aerosol groups only (no radius, gas, or spatial dependence).
   do igroup = 1, NGROUP
 
-    ! Growth sticking coefficient: the group's own value when set (> 0),
-    ! otherwise gstickl or gsticki depending on whether the group is ice.
-    ! The same gstick is used for the key-gas kernels below and for the
-    ! candidate-key kernels in candidate_kernels.
-    if( carma%f_group(igroup)%f_gstick > 0._f ) then
-      gstick = carma%f_group(igroup)%f_gstick
-    else if( is_grp_ice(igroup) ) then
+    ! Use gstickl or gsticki, depending on whether group is ice or not
+    if( is_grp_ice(igroup) ) then
       gstick = gsticki
     else
       gstick = gstickl
@@ -271,8 +264,7 @@ subroutine setupgkern(carma, cstate, rc)
 
         if( igas .ne. 0 )then
 
-          ! The latent heat belongs to the condensate that nucleates from
-          ! this gas: the target element's group.
+          ! Latent heat comes from the nucleation target element's group.
           jgroup = igelem(inuc2elem(inuc, ielem))
 
           ! Free paths of the condensing gas.
@@ -510,7 +502,7 @@ subroutine setupgkern(carma, cstate, rc)
         enddo   ! i=1,NBIN
       enddo    ! k=1,NZ
 
-      if (do_key_swap) call candidate_kernels()
+      call candidate_kernels()
     endif
   enddo       ! igroup=1,NGROUP
 
@@ -574,9 +566,8 @@ contains
       if (diffus(1,jgas) > 0._f) then
         dj(:) = diffus(:,jgas)
       else
-        ! No condensate is keyed to this gas, so setupgrow never set up its
-        ! diffusivity; use this condensate's collision diameter, as setupgrow
-        ! does for key gases (placeholder for a gas-specific value).
+        ! setupgrow sets diffus only for key gases; estimate this one from
+        ! the condensate's collision diameter.
         do kk = 1, NZ
           dj(kk) = 5._f / (16._f * AVG * carma%f_group(igroup)%f_coldia**2 * rhoa_cgs(kk,jgas) * COLINT) * &
             sqrt(RGAS * t(kk) * wtmol_air(kk) * (gwtmol_dif(jgas) + wtmol_air(kk)) / (2._f * PI * gwtmol_dif(jgas)))

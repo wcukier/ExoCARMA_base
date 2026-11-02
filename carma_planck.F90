@@ -1,17 +1,13 @@
 !! Band-integrated Planck intensity, for the radiatively coupled version of
 !! CARMA.
 !!
-!! This is a direct port of pyHARP's ``bbflux_wavenumber(wn1, wn2, temp)``
-!! (``pyharp/src/radiation/bbflux.cpp``), which is itself the classic Wiscombe
-!! PLKAVG algorithm shipped with DISORT. It integrates the Planck function over
-!! a finite wavenumber interval, which is what a correlated-k band needs: every
-!! g-point in a Sonora band carries the blackbody intensity of the *whole* band,
-!! and the Gauss weights (which sum to one per band) then average within it.
+!! Wiscombe's PLKAVG algorithm (as shipped with DISORT; same as pyHARP's
+!! ``bbflux_wavenumber``) integrates the Planck function over a wavenumber
+!! interval. Every g-point in a correlated-k band carries the intensity of the
+!! whole band, and the Gauss weights (summing to one per band) average within it.
 !!
-!! Note this is a different quantity from the existing ``planck.F90``, which
-!! gives the monochromatic intensity in cgs. This module works in **SI**
-!! (W/m^2/sr), matching pyHARP, so that the port can be validated against it
-!! directly. Conversion to cgs happens at the boundary of ``carma_rtsolve``.
+!! Unlike ``planck.F90`` (monochromatic, cgs), this module works in SI
+!! (W/m^2/sr); ``carma_rtsolve`` converts to cgs.
 !!
 !! @author Wolf Cukier
 module carma_planck
@@ -23,10 +19,8 @@ module carma_planck
   private
   public :: bbflux_wavenumber, bbflux_wavenumber_col
 
-  ! Constants, matching bbflux.cpp exactly. Any drift here shows up as a
-  ! multiplicative error on every flux, so they are deliberately not shared
-  ! with carma_constants_mod (whose values are cgs and differ in the last
-  ! digits).
+  ! PLKAVG constants (SI). Kept separate from carma_constants_mod, whose cgs
+  ! values differ in the last digits.
   real(kind=f), parameter :: C2     = 1.438786_f     ! h*c/k [cm K]
   real(kind=f), parameter :: SIGMA  = 5.67032e-8_f   ! Stefan-Boltzmann [W/m^2/K^4]
   real(kind=f), parameter :: VCUT   = 1.5_f          ! power- vs exponential-series cutoff
@@ -119,9 +113,6 @@ contains
 
 
   !! Band-integrated Planck intensity for a whole column of temperatures.
-  !!
-  !! Convenience wrapper; the level Planck source in the Toon solver needs one
-  !! of these per band per level.
   subroutine bbflux_wavenumber_col(wn1, wn2, temp, be)
 
     implicit none

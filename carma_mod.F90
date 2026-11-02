@@ -361,7 +361,7 @@ contains
       maxntsubsteps_cap, conmax, &
       do_pheat, do_pheatatm, dt_threshold, cstick, gsticki, gstickl, tstick, itbnd_pc, &
       ibbnd_pc, itbnd_gc, ibbnd_gc, do_t_evolves, do_cons_evap, &
-      do_implicit_gas, implicit_trigger, implicit_rtol, implicit_maxit, implicit_dgmax, do_key_swap)
+      do_implicit_gas, implicit_trigger, implicit_rtol, implicit_maxit)
     type(carma_type), intent(inout)     :: carma         !! the carma object
     integer, intent(out)                :: rc            !! return code, negative indicates failure
     logical, intent(in), optional       :: do_cnst_rlh   !! use constant values for latent heats (instead of varying with temperature)?
@@ -400,8 +400,6 @@ contains
     real(kind=f), intent(in), optional  :: implicit_trigger !! relative gas change in one substep that triggers the implicit solve, default = 0.1
     real(kind=f), intent(in), optional  :: implicit_rtol    !! relative tolerance on the implicit gas fixed point, default = 1e-6
     integer, intent(in), optional       :: implicit_maxit   !! Newton iteration cap for the implicit gas solve, default = 20
-    real(kind=f), intent(in), optional  :: implicit_dgmax   !! largest relative gas change an implicit substep may take, default = huge (no limit)
-    logical, intent(in), optional       :: do_key_swap      !! .true. to let condensates swap their key reactant, default = .false.
 
     ! Assume success.
     rc = RC_OK
@@ -480,16 +478,12 @@ contains
     carma%f_implicit_trigger = 0.1_f
     carma%f_implicit_rtol    = 1.e-6_f
     carma%f_implicit_maxit   = 20
+
     if (present(do_implicit_gas))  carma%f_do_implicit_gas  = do_implicit_gas
     if (present(implicit_trigger)) carma%f_implicit_trigger = implicit_trigger
     if (present(implicit_rtol))    carma%f_implicit_rtol    = implicit_rtol
     if (present(implicit_maxit))   carma%f_implicit_maxit   = implicit_maxit
-    carma%f_implicit_dgmax   = huge(1._f)
-    if (present(implicit_dgmax))   carma%f_implicit_dgmax   = implicit_dgmax
 
-    ! Swappable key reactant
-    carma%f_do_key_swap = .FALSE.
-    if (present(do_key_swap)) carma%f_do_key_swap = do_key_swap
     if (present(conmax))      carma%f_conmax      = conmax
 
     carma%f_do_step = .TRUE.
@@ -961,11 +955,9 @@ contains
       return
     end if
 
-    ! Build the gas-depletion tables.  Each group depletes its key gas with
-    ! its stofact; additional (secondary) gases are registered through
-    ! CARMA_AddGasDepletion.  dgas_dcond converts condensate mass to the gas
-    ! mass consumed, and the compressed index list keeps totalcondensate
-    ! O(number of depleted gases).
+    ! Build the gas-depletion tables. Each group depletes its key gas with its
+    ! stofact and any secondary gases registered by CARMA_AddGasDepletion.
+    ! dgas_dcond is the gas mass consumed per unit condensate mass.
     if (carma%f_NGAS > 0) then
       do igroup = 1, carma%f_NGROUP
         ielem = carma%f_group(igroup)%f_ienconc
@@ -1452,9 +1444,8 @@ contains
 
   !! Record the reference abundance of a secondary reactant: the mass mixing
   !! ratio of gas <i>igas</i> implicit in the vapor-pressure fit of group
-  !! <i>igroup</i>.  When key swapping is enabled, the condensate's
-  !! supersaturation scales with the activity of each secondary reactant
-  !! relative to this reference.
+  !! <i>igroup</i>.  The condensate's supersaturation scales with the
+  !! activity of each secondary reactant relative to this reference.
   subroutine CARMA_SetGasReference(carma, igroup, igas, xref_in, rc)
     type(carma_type), intent(inout)    :: carma    !! the carma object
     integer, intent(in)                :: igroup   !! the group index
@@ -1589,8 +1580,7 @@ contains
     ! Set to zero if particles are not subject to nucleation.
     if (present(igas)) then
       carma%f_inucgas(ielemfrom,ielemto) = igas
-      ! The contact angle is a property of the (seed element, target element)
-      ! pair, so two condensates nucleating on one seed keep distinct values.
+      ! Contact angle is keyed by (seed element, target element).
       if (present(mucos)) carma%f_mucos(ielemfrom,ielemto) = mucos
     end if
 

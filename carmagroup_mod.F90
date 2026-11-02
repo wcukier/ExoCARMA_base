@@ -41,7 +41,7 @@ contains
   subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, wtmol, ishape, eshape, is_ice, &
       rho_cond, surften_0, coldia, vp_offset, vp_tcoeff, ivaprtn, rc, &
       wtmol_core, is_type3, surften_slope, vp_metcoeff, vp_logpcoeff, lat_heat_e, stofact, desorption, &
-      gstick, irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
+      irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
       cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold, &
       qext, ssa, asym)
     type(carma_type), intent(inout)             :: carma               !! the carma object
@@ -68,7 +68,6 @@ contains
     real(kind=f), optional, intent(in)          :: lat_heat_e          !! Latent heat of evaporation [cm^2/s^2] WC
     integer, optional, intent(in)               :: stofact             !! stoichiometry factor between gas phase and condensate WC
     real(kind=f), optional, intent(in)          :: desorption          !! Desorption energy [eV]; if -1 (default), computed as 0.5 * lat_heat_e per molecule WC
-    real(kind=f), optional, intent(in)          :: gstick              !! growth sticking coefficient of this group; if <= 0 (default -1), the global gstickl / gsticki is used
     integer, optional, intent(in)               :: irhswell            !! the parameterization for particle swelling from relative humidity [I_FITZGERALD | I_GERBER]
     integer, optional, intent(in)               :: irhswcomp           !! the composition for particle swelling from relative humidity [I_FITZGERALD | I_GERBER]
     complex(kind=f), optional, intent(in)       :: refidx(carma%f_NWAVE) !! refractive index for the particle
@@ -165,10 +164,8 @@ contains
       carma%f_group(igroup)%f_ssa(:,:)  = 0._f
       carma%f_group(igroup)%f_asym(:,:) = 0._f
 
-      ! Optical properties may be supplied directly rather than computed from
-      ! refidx by the mie code. The radiatively coupled CARMApy path does this:
-      ! its tables are generated on exactly this bin grid and wavelength set, so
-      ! there is nothing left to interpolate or recompute at run time.
+      ! Optical properties may be supplied directly, on this bin grid and
+      ! wavelength set, instead of computed from refidx by mie.
       if (present(qext)) carma%f_group(igroup)%f_qext(:,:) = qext(:,:)
       if (present(ssa))  carma%f_group(igroup)%f_ssa(:,:)  = ssa(:,:)
       if (present(asym)) carma%f_group(igroup)%f_asym(:,:) = asym(:,:)
@@ -214,7 +211,6 @@ contains
     carma%f_group(igroup)%f_lat_heat_e  = -1.0_f
     carma%f_group(igroup)%f_stofact     = 1
     carma%f_group(igroup)%f_desorption  = -1.0_f
-    carma%f_group(igroup)%f_gstick      = -1.0_f
 
     ! Set optional parameters.
     if (present(irhswell))   carma%f_group(igroup)%f_irhswell     = irhswell
@@ -245,7 +241,6 @@ contains
     if (present(lat_heat_e))    carma%f_group(igroup)%f_lat_heat_e    = lat_heat_e
     if (present(stofact))       carma%f_group(igroup)%f_stofact       = stofact
     if (present(desorption))    carma%f_group(igroup)%f_desorption    = desorption
-    if (present(gstick))        carma%f_group(igroup)%f_gstick        = gstick
 
     
     ! Initialize other properties.

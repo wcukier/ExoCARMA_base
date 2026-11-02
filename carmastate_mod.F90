@@ -505,8 +505,7 @@ contains
       end if
     end if
 
-    ! Determine the condensate supersaturations (per group; groups may
-    ! share a gas reservoir).
+    ! Determine the condensate supersaturations.
     do iz = 1, cstate%f_NZ
       do igroup = 1, cstate%f_carma%f_NGROUP
         call supersat(cstate%f_carma, cstate, iz, igroup, rc)
@@ -1166,8 +1165,7 @@ contains
     if (present(cldfrc)) cstate%f_cldfrc(:) = cldfrc(:)
     if (present(rhcrit)) cstate%f_rhcrit(:) = rhcrit(:)
 
-    ! Determine the condensate supersaturations (per group; groups may
-    ! share a gas reservoir).
+    ! Determine the condensate supersaturations.
     do iz = 1, cstate%f_NZ
       do igroup = 1, cstate%f_carma%f_NGROUP
         call supersat(cstate%f_carma, cstate, iz, igroup, rc)
@@ -1667,10 +1665,7 @@ contains
   end subroutine CARMASTATE_GetGas
 
 
-  !! Gets the per-condensate saturation state.  The saturation and equilibrium
-  !! vapor pressure are properties of a condensate (group), not of a gas:
-  !! several groups may share one gas reservoir yet have different vapor
-  !! pressures.
+  !! Gets the saturation state of a condensate (group).
   !!
   !! @see CARMASTATE_GetGas
   subroutine CARMASTATE_GetGroup(cstate, igroup, rc, satice, satliq, eqice, eqliq)
@@ -1903,11 +1898,8 @@ contains
     end if
 
     ! Use the specified mass mixing ratio and the air density to determine the mass
-    ! of the gas in g/x/y/z.
-    !
-    ! NOTE: When substepping, the old per-condensate saturations must also be
-    ! initialized; use CARMASTATE_PrepareStep, which handles all gases and
-    ! groups together, instead of calling this routine gas by gas.
+    ! of the gas in g/x/y/z. When substepping, use CARMASTATE_PrepareStep,
+    ! which also initializes the old per-group saturations.
     cstate%f_gc(:, igas)  = mmr(:) * cstate%f_rhoa_wet(:)
 
     return
@@ -1915,10 +1907,8 @@ contains
 
 
   !! Loads the gas concentrations for all gases and initializes the old
-  !! per-condensate (group) saturations for substepping.  This replaces
-  !! per-gas CARMASTATE_SetGas calls: with several condensates sharing one
-  !! gas reservoir the old saturations are per group, not per gas, so they
-  !! can only be initialized once all gas concentrations are known.
+  !! per-condensate (group) saturations for substepping, which depend on
+  !! every gas concentration.
   !!
   !! @see CARMASTATE_SetGas
   subroutine CARMASTATE_PrepareStep(cstate, mmr, rc, mmr_old, satice_old, satliq_old)

@@ -166,8 +166,6 @@
 #define implicit_trigger   carma%f_implicit_trigger
 #define implicit_rtol      carma%f_implicit_rtol
 #define implicit_maxit     carma%f_implicit_maxit
-#define implicit_dgmax     carma%f_implicit_dgmax
-#define do_key_swap        carma%f_do_key_swap
 #define xref               carma%f_xref
 #define ikey               cstate%f_ikey
 #define grok               cstate%f_grok

@@ -1,25 +1,13 @@
 !! Two-stream longwave radiative transfer for the radiatively coupled version
 !! of CARMA.
 !!
-!! This is a transliteration of pyHARP's ``toon_mckay89_longwave``
-!! (``pyharp/src/rtsolver/toon_mckay89_longwave_impl.h``, MIT licensed), after
-!! Toon, McKay & Ackerman (1989), which pyHARP in turn derived from Elsie Lee's
-!! ``Exo-FMS_column_ck``. Keeping it a faithful line-for-line port is what makes
-!! the Fortran verifiable against pyHARP directly.
-!!
-!! Why not DISORT: ``pydisort`` wraps ``cdisort`` (a C rewrite of DISORT 2.1)
-!! which is GPL-3, incompatible with CARMApy's Apache-2.0 licence. The solver
-!! sits behind a deliberately narrow interface -- optical properties and a
-!! Planck source in, level fluxes out -- so a permissively licensed DISORT can
-!! be added later as an alternative backend without touching callers.
+!! Toon, McKay & Ackerman (1989), following pyHARP's ``toon_mckay89_longwave``
+!! (MIT licensed; derived from Elsie Lee's ``Exo-FMS_column_ck``).
 !!
 !! Conventions:
-!!  * All arrays passed in and out are **bottom-to-top**, matching CARMA's
-!!    ``p(1)`` = deepest. The Toon recursion runs top-down, so the reversal is
-!!    done explicitly on entry and undone on exit; nothing outside this module
-!!    sees the reversed ordering.
-!!  * Units are **SI** (W/m^2), matching pyHARP, so results compare directly.
-!!    The caller converts to cgs.
+!!  * Arrays passed in and out are bottom-to-top (index 1 deepest), as in CARMA.
+!!    The recursion runs top-down, so arrays are reversed on entry and exit.
+!!  * Units are SI (W/m^2); the caller converts to cgs.
 !!
 !! @author Wolf Cukier
 module carma_rtsolve
@@ -30,18 +18,14 @@ module carma_rtsolve
 
   private
   public :: toon_lw_column
-  !! Shared with ``carma_swsolve``: both two-stream solvers close on the same
-  !! tridiagonal system and the reference has one implementation of it, so
-  !! duplicating it here would be two copies to keep in step for no gain.
+  !! Also used by ``carma_swsolve``.
   public :: dtridgl
 
   real(kind=f), parameter :: PI_F  = 3.14159265358979323846_f
   real(kind=f), parameter :: TWOPI = 2._f * PI_F
   real(kind=f), parameter :: UBARI = 0.5_f
 
-  !! Cap on the exponent argument, as in the reference. Without it, an
-  !! optically thick layer overflows exp() before the tridiagonal solve can
-  !! cancel the large terms against each other.
+  !! Cap on the exponent argument, so optically thick layers do not overflow exp().
   real(kind=f), parameter :: EXPMAX = 35._f
 
   integer, parameter :: NMU = 5
@@ -56,10 +40,7 @@ module carma_rtsolve
 
 contains
 
-  !! Thomas algorithm for a tridiagonal system, matching pyHARP's ``dtridgl``.
-  !!
-  !! ``c`` and ``d`` are modified in place, exactly as in the reference (the
-  !! caller passes copies).
+  !! Thomas algorithm for a tridiagonal system. ``c`` and ``d`` are overwritten.
   pure subroutine dtridgl(n, a, b, c, d, x)
 
     implicit none
@@ -77,7 +58,7 @@ contains
 
     do i = 2, n
       denom = b(i) - a(i) * c(i-1)
-      if (denom == 0._f) denom = 1.e-12_f   ! guard, as in the reference
+      if (denom == 0._f) denom = 1.e-12_f   ! zero-pivot guard
 
       if (i < n) then
         c(i) = c(i) / denom
@@ -126,20 +107,9 @@ contains
     real(kind=f), intent(out), optional :: f_up_mid(nlay)  !! layer-midpoint upward flux
     real(kind=f), intent(out), optional :: f_dn_mid(nlay)  !! layer-midpoint downward flux
 
-    !! The part of each layer's emission its own bounding levels cannot see
-    !! [W/m^2/sr]: the Planck intensity at the layer's temperature less the
-    !! Planck intensity the level interpolation implies there.
-    !!
-    !! The levels are interpolated from the layer centres, so for any profile
-    !! linear in ln p they reproduce the centre exactly and this is zero -- the
-    !! source below is then the one built from levels alone, unchanged. It
-    !! departs from zero only where a layer's temperature differs from what its
-    !! neighbours imply, which an interpolation cannot represent: a
-    !! layer-to-layer oscillation lives entirely in the part an average throws
-    !! away. Without this term such a layer emits at its neighbours'
-    !! temperature rather than its own, so one colder than its surroundings
-    !! radiates as though it were warm and cools further -- a positive feedback
-    !! at the grid scale, which manufactures the oscillation it feeds on.
+    !! Layer Planck intensity minus the mean of its two level values [W/m^2/sr].
+    !! Zero for a smooth profile; without it a layer-to-layer temperature
+    !! oscillation is invisible to the level-based source and grows.
     real(kind=f), intent(in), optional :: be_corr_in(nlay)
 
     integer :: nlev, l, k, n, m, i
@@ -153,9 +123,7 @@ contains
     real(kind=f) :: Ep(nlay), Em(nlay), E1(nlay), E2(nlay), E3(nlay), E4(nlay)
     real(kind=f) :: Ep_mid(nlay), em1_mid(nlay)
 
-    !! exp(-dtau/u) and exp(-dtau/2u) at the quadrature angle in hand. Both
-    !! sweeps need them at the same (m, k), so they are built once per angle and
-    !! read twice.
+    !! exp(-dtau/u) and exp(-dtau/2u) at the current quadrature angle.
     real(kind=f) :: em2_m(nlay), em2m_m(nlay)
 
     real(kind=f) :: Af(2*nlay), Bf(2*nlay), Cf(2*nlay), Df(2*nlay), xkk(2*nlay)
@@ -177,7 +145,6 @@ contains
     l    = 2 * nlay
 
     ! ---- reverse to top-down and apply optional delta-Eddington scaling -----
-    ! When disabled (the default) the raw values are used, as in PICASO.
     do k = 1, nlay
       i = nlay - k + 1
 
@@ -213,13 +180,8 @@ contains
       gam(k)  = (1._f - alp(k)) / (1._f + alp(k))
       term(k) = UBARI / (1._f - w0(k) * hg(k))
 
-      ! An optically negligible layer has no meaningful Planck gradient; using
-      ! the midpoint value avoids dividing by ~0.
-      !
-      ! The source is linear in tau across the layer, B(tau) = B0 + B1*tau: the
-      ! levels set the slope, and `be_c` adds back the part of the layer's own
-      ! emission they cannot represent. It is zero for a resolved profile, so
-      ! this is the level-only source wherever the column is smooth.
+      ! Source linear in tau across the layer, B(tau) = B0 + B1*tau, plus the
+      ! layer correction be_c. An optically negligible layer uses the level mean.
       if (dtau(k) <= 1.e-6_f) then
         B1(k) = 0._f
         B0(k) = 0.5_f * (be(k+1) + be(k)) + be_c(k)
@@ -241,18 +203,15 @@ contains
       E3(k)  = gam(k) * Ep(k) + Em(k)
       E4(k)  = gam(k) * Ep(k) - Em(k)
 
-      ! The half-layer counterparts, for the midpoint fluxes. They carry no
-      ! angular dependence, so the quadrature below reads them rather than
-      ! rebuilding them at every angle.
+      ! Half-layer counterparts, for the midpoint fluxes.
       Ep_mid(k)  = exp(min(0.5_f * lam(k) * dtau(k), EXPMAX))
       em1_mid(k) = 1._f / Ep_mid(k)
     end do
 
     ! ---- boundary conditions -------------------------------------------------
     if (top_emission_flag < 0) then
-      ! Auto: an effective optical depth above the model top, so a finite
-      ! downward flux enters at TOA. btop_factor = p(1)/(p(2)-p(1)) reproduces
-      ! PICASO's get_thermal_1d.
+      ! Auto: effective optical depth dtau(1)*btop_factor above the model top
+      ! (btop_factor = p(1)/(p(2)-p(1)), as in PICASO's get_thermal_1d).
       Btop = (1._f - exp(-(dtau(1) * btop_factor) / UBARI)) * be(1)
     else
       Btop = real(top_emission_flag, kind=f) * be(1)
@@ -265,8 +224,7 @@ contains
       bsurf_flux = (1._f - a_surf) * Bsurf
     else
       ! Gas giant: Planck plus its gradient extrapolated below the deepest
-      ! level. This is what lets the internal heat flux emerge, and is the
-      ! branch a brown dwarf needs.
+      ! level, which carries the internal heat flux.
       bsurf_flux = Bsurf + B1(nlay) * UBARI
     end if
 
@@ -305,7 +263,7 @@ contains
       xk1(n) = xkk(2*n-1) + xkk(2*n)
       xk2(n) = xkk(2*n-1) - xkk(2*n)
 
-      ! Catastrophic cancellation guard, as in the reference.
+      ! Catastrophic cancellation guard.
       if (abs(xk2(n)) < 1.e-30_f * abs(xkk(2*n))) xk2(n) = 0._f
 
       if (w0(n) <= 1.e-4_f) then
@@ -367,8 +325,7 @@ contains
                   + sigma1(k) * (1._f - em2) &
                   + sigma2(k) * (u * em2 + dtau(k) - u)
 
-        ! Same source-function integral, stopped at half the layer's optical
-        ! depth (PICASO's flux_minus_mdpt).
+        ! Same integral to half the layer's optical depth.
         em2_mid = em2m_m(k)
 
         mid_val = dn_g(k) * em2_mid &

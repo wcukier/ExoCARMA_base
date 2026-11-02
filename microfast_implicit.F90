@@ -5,25 +5,18 @@
 #include "carma_globaer.h"
 
 !! Fast microphysics for one layer and substep with the gas depletion solved
-!! implicitly.
+!! implicitly (backward Euler in the gas).  Without do_implicit_gas this is a
+!! single explicit microfast pass.
 !!
-!! microfast evaluates every growth, evaporation and nucleation rate from the gas
-!! it is handed, advances the particles, and sets the new gas from the change in
-!! condensate.  Handed the start-of-substep gas, that is explicit in the gas: a
-!! reservoir the substep's growth can exhaust is overdrawn.  This routine finds
-!! instead the gas g* for which the rates evaluated at g* return g* at the end of
-!! the substep (backward Euler in the gas).  Every process then sees the same
-!! end-of-substep gas, and their relative rates are those of the unmodified rate
-!! laws.  Whatever g* is used, the final gas is the start-of-substep gas less the
-!! condensate formed, so mass is conserved exactly; convergence only decides how
-!! consistent the rates are with that final gas.
+!! Finds the gas g* for which the rates evaluated at g* return g* at the end of
+!! the substep, so every process sees the same end-of-substep gas and no
+!! reservoir is overdrawn.  The final gas is always the start-of-substep gas less
+!! the condensate formed, so mass is conserved whatever g* is; convergence only
+!! sets how consistent the rates are with that final gas.
 !!
-!! The explicit pass is kept whenever it changes no gas by more than
-!! implicit_trigger, so quiet layers are identical to the explicit scheme.  When
-!! the iteration does not converge, a retry is requested so the substep shrinks;
-!! on the last allowed retry the best iterate is accepted instead.
-!!
-!! Particle temperature, latent heating and the atmospheric temperature remain
+!! The explicit pass is kept when no gas changes by more than implicit_trigger.
+!! If the iteration does not converge a retry is requested; on the last allowed
+!! retry the best iterate is accepted.  Temperatures and latent heating stay
 !! explicit: each pass starts from the start-of-substep temperature.
 subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in, dt_suggest)
 
@@ -108,7 +101,7 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
 
   ! Key reactants are chosen from the start-of-substep gas and held fixed while
   ! the rates are iterated, since a key change is a discontinuity in the rates.
-  if (do_key_swap) call select_keys(gc0, swapped)
+  call select_keys(gc0, swapped)
 
   if (.not. do_implicit_gas) then
     call microfast(carma, cstate, iz, rc, maxrate, dtime_in, nretries_in, dt_suggest, gc0, 2)
@@ -145,15 +138,15 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
     end if
   end do
 
-  ! Newton iteration in ln(g*), starting from the start-of-substep gas, whose
-  ! residual the explicit pass already provides.  If the converged gas hands a
-  ! condensate's key to another reactant, the solve is repeated once with the
-  ! new keys.  A gas left out of the solve can still be driven by the solved
-  ! ones through the particles they leave behind; if the converged state moves
-  ! it appreciably it joins the solve, which is repeated from the converged gas.
+  ! Newton iteration in ln(g*) from the start-of-substep gas, whose residual the
+  ! explicit pass already gives.  If the converged gas changes a condensate's key
+  ! reactant, the solve is repeated once with the new keys.  A gas outside the
+  ! solve that the converged state moves appreciably joins it, and the solve is
+  ! repeated from the converged gas.
   do i = 1, nact
     y(i) = log(gc0(iact(i)))
   end do
+
   do iexp = 1, NGAS
   do isolve = 1, 2
   if ((isolve == 1) .and. (iexp == 1)) then
@@ -168,6 +161,7 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
     end if
     gnew(:) = gc(iz,:)
   end if
+
   phi       = sum(fres(1:nact)**2)
   ybest(:)  = y(:)
   phibest   = phi
@@ -210,6 +204,7 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
       end do
     end do
     if (any(jac(1:nact,1:nact) /= jac(1:nact,1:nact))) exit
+
     do k = nact, 1, -1
       if (jac(k,k) == 0._f) exit
       dlng(k) = (dlng(k) - sum(jac(k,k+1:nact) * dlng(k+1:nact))) / jac(k,k)
@@ -260,7 +255,8 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
     if (converged) method = merge(2, 1, at_switch)
   end if
 
-  if (.not. (converged .and. do_key_swap .and. isolve == 1)) exit
+  if (.not. (converged .and. isolve == 1)) exit
+
   gstar(:) = gc0(:)
   do i = 1, nact
     gstar(iact(i)) = exp(y(i))
@@ -270,6 +266,7 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
   end do
 
   if (.not. converged) exit
+
   added = .false.
   do igas = 1, NGAS
     if (gc0(igas) <= 0._f) cycle
@@ -286,9 +283,8 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
   end do
 
 #ifdef CARMA_TEST_CHECKS
-  ! Test-build diagnostic: implicit solves, their size, Newton iterations,
-  ! passes, outcome (1 = converged), best residual, method (0 = Newton,
-  ! 1 = bracketed) and the gases solved for.
+  ! Diagnostic: layer, number of solved gases, Newton iterations, passes,
+  ! converged flag, best residual, method and the solved gases.
   write(91,'(a,i4,2i3,i5,i2,es13.4e3,i2,*(i3))') 'I', iz, nact, iter, npass, merge(1, 0, converged), phibest, &
     method, (iact(i), i = 1, nact)
 #endif
@@ -305,23 +301,6 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
     y(1:nact) = ybest(1:nact)
   end if
 
-  ! Accuracy: backward Euler is stable for any substep, but competing
-  ! condensates partition a shared reservoir correctly only while the gas
-  ! changes little across the substep.  A larger change asks for a shorter
-  ! substep while retries remain.
-  if (converged .and. (nretries_in < maxretries)) then
-    dmax = 0._f
-    do i = 1, nact
-      dmax = max(dmax, abs(exp(y(i)) - gc0(iact(i))) / gc0(iact(i)))
-    end do
-    if (dmax > implicit_dgmax) then
-      call restore()
-      dt_suggest = min(dt_suggest, 0.9_f * dtime_in * implicit_dgmax / dmax)
-      rc = RC_WARNING_RETRY
-      return
-    end if
-  end if
-
   ! Final pass at g*, with the usual positivity and threshold checks.
   call restore()
   do i = 1, nact
@@ -333,17 +312,14 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
 
 contains
 
-  !! Bracketed fallback for the implicit gas: each solved gas in turn is found
-  !! in ln(g) with the other gases held, sweeping until the joint fixed point
-  !! converges; Illinois (safeguarded regula falsi) steps first, then
-  !! bisection.  The bracket is guaranteed for a single gas: with no gas the
-  !! condensates cannot grow, so the residual is positive, and with ample gas
-  !! it is negative.  A process that switches on at some abundance makes the
-  !! residual jump across zero rather than cross it; there the bracket closes
-  !! on the switch point without the residual vanishing, and the lower end of
-  !! the bracket is accepted once it is narrower than implicit_rtol.  When a
-  !! bracket cannot be found the solve reports failure and the substep is
-  !! refined as before.
+  !! Bracketed fallback: each solved gas in turn is found in ln(g) with the
+  !! others held, sweeping until the joint fixed point converges; Illinois
+  !! (safeguarded regula falsi) steps, then bisection.  For a single gas a
+  !! bracket exists: with no gas the residual is positive, with ample gas
+  !! negative.  A process that switches on at some abundance makes the residual
+  !! jump across zero; the bracket then closes on the switch point and its lower
+  !! end is accepted once narrower than implicit_rtol.  ok = .false. when no
+  !! bracket is found.
   subroutine bracket_solve(ok, jumped_any)
     logical, intent(out) :: ok
     logical, intent(out) :: jumped_any
@@ -422,6 +398,7 @@ contains
             jumped_any = .true.
             exit
           end if
+
           if (ibr <= NILLIN) then
             uc = (ulo * fhi - uhi * flo) / (fhi - flo)
           else
@@ -439,6 +416,7 @@ contains
             gas_ok = .true.
             exit
           end if
+
           ! flo0 and fhi0 keep the true residuals at the bracket ends; flo and
           ! fhi carry the Illinois down-weighting.
           if (fc > 0._f) then

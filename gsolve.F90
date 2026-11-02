@@ -33,8 +33,7 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlh
   real(kind=f), intent(in)             :: dtime_in    !! thread-local dtime for this substep
   real(kind=f), intent(in)             :: nretries_in !! thread-local retry count
   real(kind=f), intent(inout)          :: dt_suggest  !! substep size the failing rates could tolerate [s];
-                                                      !! only ever reduced, and only meaningful when a
-                                                      !! RC_WARNING_RETRY is issued
+                                                      !! only reduced, and set only on RC_WARNING_RETRY
   real(kind=f), intent(in)             :: gc_base(NGAS) !! gas at the start of the substep [g/x/y/z]; the condensate
                                                         !! change is applied to this, not to the gc the rates saw
   integer, intent(in)                  :: gas_check   !! 0 = no positivity/threshold checks, 1 = checks that request a
@@ -67,10 +66,8 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlh
               ',supsatl=',e10.3,',t=',f6.2, ', setting gc to 1e-50*rhoa(iz)')
   
 
-  ! Determine the total amount of condensate for each gas.  Totals are in
-  ! gas-mass-equivalent units (the per-group stoichiometric conversion is
-  ! applied in totalcondensate), so the gas budget below needs no further
-  ! stoichiometry.
+  ! Determine the total amount of condensate for each gas, in units of the
+  ! gas mass it consumed.
   call totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlheat, rc)
 
   ! Latent heating from the net change in condensate across all groups.
@@ -96,9 +93,7 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlh
     ! Don't let the gas concentration go negative.
     if (gc(iz,igas) < 0.0_f) then
 #ifdef CARMA_TEST_CHECKS
-      ! Test-build diagnostic: failing gas, attempt, substep, the gas on hand, its
-      ! net production, whether this attempt clamps, and every condensate's
-      ! supersaturation at the start of the substep.
+      ! Test-build diagnostic of the failing gas
       write(91,'(a,2i4,f6.0,4es15.6e3,i2,*(es13.4e3))') 'F', iz, igas, nretries_in, dtime_in, gc_old, &
         gasprod(igas,iz), phochemprod_gas(iz,igas), merge(1, 0, nretries_in == maxretries .and. gas_check == 2), &
         (supsatl(iz,ig), ig = 1, NGROUP)

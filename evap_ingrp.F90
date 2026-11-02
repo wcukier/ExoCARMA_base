@@ -47,8 +47,7 @@ subroutine evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
     return
   endif
 
-  ! Consistent evaporation transfer: bound the explicit production by what
-  ! the donor bin's implicit loss actually surrenders (see evapp).
+  ! Limit the transfer to what the donor bin's implicit loss surrenders (see evapp).
   consfact = 1._f
   if (do_cons_evap) then
     consfact = 1._f / (1._f + evaplg(ibin,ig,iz)*dtime_in)

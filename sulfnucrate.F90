@@ -118,9 +118,7 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   h2so4 = h2so4_cgs * AVG / gwtmol_dif(igash2so4)
 
   ! Compute relative humidity of water wrt liquid water       
-  ! Relative humidity of water: compute the water saturation directly from
-  ! the H2O vapor pressure (supersaturations are stored per condensate
-  ! group, and a water group need not exist in a sulfate run).
+  ! (from the H2O vapor pressure, since water need not be a condensate group)
   call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
   rh = (h2o_cgs * (RGAS / gwtmol_dif(igash2o)) * t(iz) / pvap_h2o_liq) * 100._f
 

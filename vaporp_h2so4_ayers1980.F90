@@ -60,8 +60,7 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   ! Convert water vapor concentration to g/cm3:
   gc_cgs = gc(iz, igash2o) / (xmet(iz) * ymet(iz) * zmet(iz))
 
-  ! Water vapor pressure computed directly (vapor pressures are stored per
-  ! condensate group, and a water group need not exist here).
+  ! Vapor pressures are stored per group; water need not be a group here.
   call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
 
   ! Compute the sulfate composition based on Hanson parameterization

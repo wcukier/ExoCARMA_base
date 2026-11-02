@@ -85,8 +85,7 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
               if( (inucproc(iepart,ienucto) .eq. I_DROPACT) .or. &
 	  (inucproc(iepart,ienucto) .eq. I_HETGEN) ) then
 
-                ! Supersaturation of the condensate that nucleates onto this
-                ! seed: the target element's group.
+                ! Supersaturation of the target element's group
                 jg = igelem(ienucto)
                 ss = max( supsatl(iz,jg), supsatlold(iz,jg) )
 
@@ -150,10 +149,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
               if (dmdt /= 0._f) then
                 dt_adv = min( dt_adv, dm(ibin_small(ig),ig)/dmdt )
 
-                ! Gas exhaustion: this group's growth draws on every gas in its
-                ! depletion list; don't let one substep consume more than a
-                ! fraction of any of them.  Only condensation (ss > 0) can
-                ! exhaust a gas -- evaporation returns it.
+                ! Gas exhaustion: limit condensation in one substep to a
+                ! fraction DT_SAFETY of each gas the group depletes.
                 if (ss > 0._f) then
                 do j = 1, carma%f_ndepgas(ig)
                   jgas = carma%f_idepgas(j, ig)
@@ -172,13 +169,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
       ntsubsteps = nint(min(real(maxsubsteps, kind=f), real(dtime_save, kind=f) / dt_adv))
       ntsubsteps = max( minsubsteps, ntsubsteps )
 
-      ! The exhaustion criterion obeys the same maxsubsteps bound as the other
-      ! predictor criteria: the predictor prescribes on every step, so an
-      ! aggressive estimate here taxes the whole run.  A layer that truly
-      ! needs more than maxsubsteps fails its first attempt and the
-      ! rate-informed retry in newstate jumps straight to the required count
-      ! (bounded there by maxntsubsteps_cap).  Real arithmetic so a tiny
-      ! dt_exh cannot overflow an integer.
+      ! Apply the exhaustion limit, bounded by maxsubsteps; layers that need
+      ! more are handled by the retry in newstate.
       if (dt_exh < dtime_save) then
         ntsubsteps = max( ntsubsteps, &
              int(min(real(maxsubsteps, kind=f), dtime_save / dt_exh + 1._f)) )

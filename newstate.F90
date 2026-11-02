@@ -315,16 +315,14 @@ subroutine newstate(carma, cstate, rc)
                 exit
               end if
 
-              ! Jump straight to the substep count the failing rates call for,
-              ! with doubling as the floor so a bad estimate still makes
-              ! progress, capped so a pathological rate can't run away.
+              ! At least double the substeps, more if dt_suggest calls for it,
+              ! up to maxntsubsteps_cap.
               !
               ! NOTE: We are going to rely upon retries, so don't clutter the log
               ! with retry print statements. They slow down the run.
               nt_est = real(ntsubsteps, kind=f) * 2._f
               if (dt_suggest > 0._f .and. dt_suggest < dtime_orig) then
-                ! +1 in place of ceiling(); stays in real arithmetic so a
-                ! pathologically small dt_suggest cannot overflow an integer.
+                ! +1 for ceiling(), kept real to avoid integer overflow
                 nt_est = max(nt_est, dtime_orig / dt_suggest + 1._f)
               end if
               ntsubsteps = int(min(real(maxntsubsteps_cap, kind=f), nt_est))

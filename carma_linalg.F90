@@ -1,19 +1,8 @@
 !! Dense linear algebra for the radiatively coupled version of CARMA.
 !!
 !! LU factorisation with partial pivoting, and the corresponding triangular
-!! solve. Written out rather than called from LAPACK because this build links
-!! no external libraries at all -- there is no `-l` anywhere in
-!! `src/CARMA/Makefile` -- and `carmapy.exe` is meant to stay self-contained.
-!!
-!! The only consumer is ``carma_rce``, whose implicit temperature step needs a
-!! dense system solved: the Jacobian of the heating rate is measured to be
-!! dense on this vertical discretisation, with a tridiagonal capturing only
-!! about half of it at every depth. Pinned by
-!! ``test_jacobian_is_not_tridiagonal`` in ``tests/integration/test_rce.py``.
-!!
-!! Kept in its own module, depending on nothing but the precision kind, so its
-!! correctness can be checked on its own against a reference implementation
-!! rather than only through the physics that uses it.
+!! solve, for the dense heating-rate Jacobian in ``carma_rce``. Written out
+!! rather than linked from LAPACK so the executable has no external libraries.
 !!
 !! @author Wolf Cukier
 module carma_linalg
@@ -50,9 +39,7 @@ contains
 
     do k = 1, n - 1
 
-      ! Partial pivoting: without it a zero on the diagonal stops the
-      ! factorisation even when the matrix is perfectly well conditioned, and
-      ! a small one costs digits.
+      ! Partial pivoting: pick the largest entry in column k.
       ip   = k
       amax = abs(a(k,k))
       do i = k + 1, n
@@ -97,8 +84,7 @@ contains
   !! Solve ``A*x = b`` from the factors produced by ``lu_factor``.
   !!
   !! ``a`` and ``piv`` are untouched, so one factorisation can be reused for
-  !! many right-hand sides -- which is the point of splitting the two, since
-  !! the factorisation is the expensive half.
+  !! many right-hand sides.
   pure subroutine lu_solve(n, a, piv, b, x)
 
     implicit none

@@ -1,35 +1,14 @@
 !! Two-stream shortwave radiative transfer for the radiatively coupled version
 !! of CARMA.
 !!
-!! This is a transliteration of pyHARP's ``toon_mckay89_shortwave``
-!! (``pyharp/src/rtsolver/toon_mckay89_shortwave_impl.h``, MIT licensed), after
-!! Toon, McKay & Ackerman (1989). It is the companion to ``carma_rtsolve``'s
-!! longwave solver and shares its tridiagonal solve, so the two stay in step.
+!! Toon, McKay & Ackerman (1989), following pyHARP's ``toon_mckay89_shortwave``
+!! (MIT licensed). The source is a collimated beam entering the top.
 !!
-!! The difference from the longwave is the source. There the source is thermal
-!! and lives in every layer; here it is a **collimated beam entering the top**,
-!! attenuated along a slant path and scattered into the diffuse streams. So
-!! this routine takes an incident flux and an incidence angle where the
-!! longwave takes a Planck profile, and it has a direct-beam term the longwave
-!! has no analogue for.
+!! Conventions are those of ``carma_rtsolve``: arrays bottom-to-top, SI units.
 !!
-!! Conventions, matching ``carma_rtsolve`` exactly:
-!!  * All arrays passed in and out are **bottom-to-top**, matching CARMA's
-!!    ``p(1)`` = deepest. The Toon recursion runs top-down, so the reversal is
-!!    done on entry and undone on exit; nothing outside this module sees the
-!!    reversed ordering.
-!!  * Units are **SI** (W/m^2), matching pyHARP, so results compare directly.
-!!
-!! Two behaviours worth knowing before reading the code:
-!!
-!!  * **Delta-Eddington scaling is unconditional here**, unlike the longwave
-!!    where it is a flag. That follows the reference, and it is the right
-!!    default: shortwave cloud scattering is strongly forward-peaked
-!!    (``g ~ 0.8``), which the unscaled two-stream handles badly.
-!!  * **A purely absorbing column takes a separate branch.** With no scattering
-!!    anywhere and no surface reflection, the answer is just Beer-Lambert
-!!    attenuation of the beam, and the general solver's coefficients are
-!!    singular in that limit. The branch is not an optimisation.
+!!  * Delta-Eddington scaling is always applied (forward-peaked cloud scattering).
+!!  * A column with no scattering and no surface reflection is pure
+!!    Beer-Lambert; the general coefficients are singular in that limit.
 !!
 !! @author Wolf Cukier
 module carma_swsolve
@@ -42,17 +21,13 @@ module carma_swsolve
   private
   public :: toon_sw_column
 
-  !! Cap on the exponent argument, as in the reference. Without it an optically
-  !! thick layer overflows exp() before the tridiagonal solve can cancel the
-  !! large terms against each other.
+  !! Cap on the exponent argument, so optically thick layers do not overflow exp().
   real(kind=f), parameter :: EXPMAX = 35._f
 
-  !! Below this single-scattering albedo a layer is treated as purely
-  !! absorbing, matching the reference's threshold.
+  !! Below this single-scattering albedo a layer is treated as purely absorbing.
   real(kind=f), parameter :: WMIN = 1.e-12_f
 
-  !! Substituted for a coefficient that would otherwise be exactly zero and
-  !! divide. Taken from the reference rather than reasoned out independently.
+  !! Substituted for a coefficient that would otherwise be exactly zero and divide.
   real(kind=f), parameter :: TINY_SUB = 1.e-10_f
 
 contains
@@ -63,10 +38,8 @@ contains
   !! All input and output arrays are bottom-to-top: index 1 is the deepest
   !! layer/level, index nlay (or nlay+1) is the top of the atmosphere.
   !!
-  !! ``f0`` is the incident flux the beam would carry through a surface normal
-  !! to it; the flux entering the top of the column is ``f0 * mu`` there. A
-  !! caller wanting a dayside average or a full redistribution expresses that
-  !! through ``mu``, not by pre-multiplying ``f0``.
+  !! ``f0`` is the beam flux through a surface normal to it; the flux entering
+  !! the column is ``f0 * mu``.
   subroutine toon_sw_column(nlay, f0, mu_in, dtau_in, w0_in, g_in, w_surf, &
                             f_up, f_dn, f_up_mid, f_dn_mid)
 
@@ -127,13 +100,11 @@ contains
       mu(k) = mu_in(nlev - k + 1)
     end do
 
-    ! mu(1) is the top of the column, mu(nlev) the bottom. They differ only
-    ! when a caller applies a sphericity correction along the slant path.
+    ! mu(1) is the top of the column, mu(nlev) the bottom.
     uniform_mu = (mu(nlev) == mu(1))
 
     ! ---- unscaled cumulative optical depth ---------------------------------
-    ! This is the depth the *beam* sees in the purely absorbing branch, before
-    ! any delta-Eddington rescaling, so it is accumulated separately.
+    ! Used by the purely absorbing branch, before delta-Eddington rescaling.
     tau_in(1) = 0._f
     do k = 1, nlay
       tau_in(k+1) = tau_in(k) + dtau_raw(k)
@@ -147,8 +118,7 @@ contains
       end if
     end do
 
-    ! A reflecting surface puts photons back into the diffuse streams, so the
-    ! beam-only branch cannot represent it however little the gas scatters.
+    ! A reflecting surface feeds the diffuse streams, so needs the full solver.
     if (w_surf > WMIN) all_zero_w = .false.
 
     if (all_zero_w) then
@@ -264,16 +234,14 @@ contains
         n = n + 1
       end do
 
-      ! Bottom boundary: the surface reflects both the diffuse streams and the
-      ! direct beam that reaches it (Toon89 eqn 37). With w_surf = 0, the
-      ! gas-giant case, this reduces to no reflection at all.
+      ! Bottom boundary: the surface reflects the diffuse streams and the
+      ! direct beam (Toon89 eqn 37).
       bsurf = w_surf * dir(nlev)
       Af(l) = E1(nlay) - w_surf * E3(nlay)
       Bf(l) = E2(nlay) - w_surf * E4(nlay)
       Cf(l) = 0._f
       Df(l) = bsurf - Cp(nlay) + w_surf * Cm(nlay)
 
-      ! dtridgl consumes c and d, so it gets copies.
       Cwrk(:) = Cf(:)
       Dwrk(:) = Df(:)
       call dtridgl(l, Af, Bf, Cwrk, Dwrk, xkk)
@@ -283,8 +251,7 @@ contains
         xk1(n) = xkk(2*n - 1) + xkk(2*n)
         xk2(n) = xkk(2*n - 1) - xkk(2*n)
 
-        ! A near-exact cancellation here is noise, not signal; the reference
-        ! flushes it so a denormal cannot propagate into the flux.
+        ! Catastrophic cancellation guard.
         if (abs(xk2(n)) < 1.e-30_f * abs(xkk(2*n))) xk2(n) = 0._f
 
         up_td(n) = xk1(n) + gam(n) * xk2(n) + Cpm1(n)
@@ -296,8 +263,7 @@ contains
       dn_td(nlev) = xk1(nlay) * Ep(nlay) * gam(nlay) &
                     + xk2(nlay) * Em(nlay) + Cm(nlay)
 
-      ! The diffuse solution carries only scattered light; the beam is added
-      ! back here so f_dn is the total downward flux.
+      ! f_dn is diffuse plus direct beam.
       do k = 1, nlev
         dn_td(k) = dn_td(k) + dir(k)
       end do
@@ -305,13 +271,8 @@ contains
     end if
 
     ! ---- layer midpoints ----------------------------------------------------
-    ! The diffuse streams are smooth across a layer, so the level value is
-    ! accurate to O(dtau) at the midpoint. The direct beam is not -- it decays
-    ! exponentially -- so it is replaced by its geometric mean across the
-    ! layer, which is exact for an exponential. Without that correction a
-    ! midpoint net flux mixes an accurate longwave with a level-approximated
-    ! shortwave, and the inconsistency shows up as drift off an irradiated
-    ! fixed point.
+    ! Diffuse streams take the upper level value (O(dtau)); the direct beam
+    ! takes its geometric mean across the layer, exact for an exponential.
     if (present(f_up_mid) .or. present(f_dn_mid)) then
       do k = 1, nlay
         up_mid(k) = up_td(k)
