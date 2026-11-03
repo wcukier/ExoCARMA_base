@@ -82,6 +82,7 @@ module carma_types_mod
     !   name          Name of the gas
     !   shortname     Short name of the gas
     !   wtmol_dif     Molecular weight of the diffusing gas [g/mol]
+    !   icomposition  Gas compound specification [I_GCOMP_...]
     !   dgc_threshold convergence criteria for gas concentration [fraction]
     !   ds_threshold  convergence criteria for gas saturation [fraction]
     !
@@ -158,7 +159,30 @@ module carma_types_mod
     !   asym        asymmetry factor
     !   ifallrtn    routine to use to calculate fall velocity  [I_FALLRTN_...]
     !   imiertn     mie routine for optical properties [I_MIERTN_...]
+    !   rm          Monomer radius for fractal particles [cm]
+    !   fdim        Fractal dimension for fractal particles
     !   dpc_threshold convergence criteria for particle concentration [fraction]
+    !
+    ! Condensate properties of the volatile element in this group:
+    !
+    !   wtmol       Molecular weight of the condensate (mantle) [g/mol]
+    !   wtmol_core  Molecular weight of the core condensate [g/mol]
+    !   ivaprtn     Vapor pressure routine for the condensate [I_VAPRTN_...]
+    !   rho_cond    Density of the condensate [g/cm^3]
+    !   surften_0   Surface tension at 0 K, linearly extrapolated [dyne/cm]
+    !   surften_slope Slope of surface tension with temperature,
+    !               surften = surften_0 - surften_slope*T [dyne/cm/K]
+    !   coldia      Collision diameter [cm]
+    !   lat_heat_e  Latent heat of evaporation [cm^2/s^2]
+    !   desorption  Desorption energy [eV]; -1 = 0.5*lat_heat_e per molecule
+    !   is_type3    1 for a type III reaction (Helling & Woitke 2006), else 0
+    !   vp_offset   Constant term of the vapor pressure fit,
+    !               log10(pvap) = vp_offset - vp_tcoeff/T - vp_metcoeff*[Fe/H]
+    !                             - vp_logpcoeff*log10(P)
+    !   vp_tcoeff   1/T coefficient of the vapor pressure fit [K]
+    !   vp_metcoeff Metallicity coefficient of the vapor pressure fit
+    !   vp_logpcoeff log10(P) coefficient of the vapor pressure fit
+    !   stofact     Stoichiometric factor between the key gas and the condensate
     !
     character(len=CARMA_NAME_LEN)               :: f_name
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
@@ -205,11 +229,6 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:)     :: f_arat       ! (NBIN)
     real(kind=f), allocatable, dimension(:)     :: f_rrat       ! (NBIN)
     real(kind=f)                                :: f_dpc_threshold
-    ! Condensate properties of the volatile element in this group.
-    !   wtmol       Molecular weight of the condensate [g/mol]
-    !   wtmol_core  Molecular weight of the core condensate [g/mol]
-    !   ivaprtn     vapor pressure routine for the condensate
-    !   desorption  user-specified desorption energy [eV], -1 = auto
     real(kind=f)                                :: f_wtmol         ! WC
     real(kind=f)                                :: f_wtmol_core    ! WC
     integer                                     :: f_ivaprtn       ! WC
@@ -306,8 +325,11 @@ module carma_types_mod
     ! parent model's responsibility to provide the logical unit number to be used for
     ! model output.
     !
-    integer :: f_LUNOPRT   ! output print file
-    integer :: f_lundiag   ! output diagnostic file
+    !   LUNOPRT   output print file
+    !   lundiag   output diagnostic file
+    !
+    integer :: f_LUNOPRT
+    integer :: f_lundiag
 
     ! Model startup control variables
     !
@@ -357,7 +379,7 @@ module carma_types_mod
     !   do_coag     If .true. then do coagulation                         {init}
     !   do_detrain  If .true. then do detrainment                         {init}
     !   do_drydep   If .true. then do dry deposition                      {init}
-    !   do_fixedinitIf .true. then do initialize from reference atm       {init}
+    !   do_fixedinit If .true. then do initialize from reference atm      {init}
     !   do_grow     If .true. then do condensational growth and evap.     {init}
     !   do_incloud  If .true. then do incloud growth and coagulation      {init}
     !   do_explised If .true. then do sedimentation with substepping      {init}
@@ -366,8 +388,10 @@ module carma_types_mod
     !   do_print_init If .true. then do print initializtion info          {init}
     !   do_step     if .true. then varstepping succeeded                  {init}
     !   do_substep  if .true. then use substepping                        {init}
+    !   do_cons_evap If .true. then cap evaporation transfer at the donor bin's implicit loss {init}
+    !   do_t_evolves If .true. then temperature evolves between steps (e.g. radiative
+    !               coupling); if .false., setupgkern caches its outputs   {init}
     !   do_thermo   if .true. then do solve thermodynamic equation        {init}
-    !   do_vdiff    If .true. then do Brownian diffusion                  {init}
     !   do_vtran    If .true. then do vertical transport                  {init}
     !   do_cnst_rlh If .true. then uses constants for rlhe and rlhm       {setupgrow}
     !   igrowgas    Gas that condenses into a particle element            {setupgrow}
@@ -380,12 +404,35 @@ module carma_types_mod
     !   ievp2bin    Total evap. transfers particles into bin ievp2bin     {setupnuc}
     !   inuc2bin    Nucleation transfers particles into bin inuc2bin      {setupnuc}
     !   maxsubsteps Maximum number of time substeps allowed
-    !   minsubsteps Maximum number of time substeps allowed
+    !   minsubsteps Minimum number of time substeps per step
     !   maxretries  Maximum number of substepping retries allowed
     !   maxntsubsteps_cap  Hard cap on the substep count a retry may request
+    !   do_implicit_gas  If .true. then solve gas depletion implicitly with the particles
+    !   implicit_trigger Relative gas change in one substep above which the implicit solve runs
+    !   implicit_rtol    Relative tolerance on the implicit gas fixed point
+    !   implicit_maxit   Newton iteration cap for the implicit gas solve
     !   igash2o     gas index for H2O
     !   igash2so4   gas index for H2SO4
     !   igasso2     gas index for SO2
+    !   igass8, igass2, igaskcl, igaszns, igasna2s, igasmns, igascr, igasfe,
+    !   igasmg2sio4, igastio2, igasal2o3, igasco
+    !               gas index for S8, S2, KCl, ZnS, Na2S, MnS, Cr, Fe, Mg2SiO4,
+    !               TiO2, Al2O3 and CO
+    !   itbnd_gc    Top boundary condition flag for gases                 {init}
+    !   ibbnd_gc    Bottom boundary condition flag for gases              {init}
+    !   mucos       Cosine of the contact angle for heterogeneous nucleation,
+    !               (seed element, target element)                        {CARMA_AddNucleation}
+    !   nu_dep      Stoichiometric coefficient of a gas in a group's condensation
+    !               reaction                                              {CARMA_AddGasDepletion}
+    !   dgas_dcond  Mass of gas consumed per mass of condensate formed [g/g] {CARMA_InitializeGrowth}
+    !   ndepgas     Number of gases a group depletes                      {CARMA_InitializeGrowth}
+    !   idepgas     Indices of the gases a group depletes                 {CARMA_InitializeGrowth}
+    !   xref        Reference mass mixing ratio of each secondary reactant in the
+    !               condensate's vapor-pressure fit [g/g]                 {CARMA_SetGasReference}
+    !   nnucelem    Number of elements that nucleate into an element      {CARMA_InitializeGrowth}
+    !   inucelem    Elements that nucleate into an element                {CARMA_InitializeGrowth}
+    !   nnucbin     Number of source bins that nucleate into a target bin {CARMA_InitializeGrowth}
+    !   inucbin     Source bins that nucleate into a target bin           {CARMA_InitializeGrowth}
     !   dt_threshold convergence criteria for temperature [fraction]
     !   cstick      accommodation coefficient - coagulation
     !   gsticki     accommodation coefficient - growth (ice), default = 0.93
@@ -406,8 +453,8 @@ module carma_types_mod
     logical                                       :: f_do_print_init
     logical                                       :: f_do_step
     logical                                       :: f_do_substep
-    logical                                       :: f_do_cons_evap    !! cap evaporation transfer at the donor's implicit loss
-    logical                                       :: f_do_t_evolves    !! .true. if temperature evolves between steps (e.g. radiative coupling). When .false., setupgkern caches its outputs after the first call.
+    logical                                       :: f_do_cons_evap
+    logical                                       :: f_do_t_evolves
     logical                                       :: f_do_thermo
     logical                                       :: f_do_cnst_rlh
     logical, allocatable, dimension(:,:)          :: f_if_nuc       !(NELEM,NELEM)
@@ -431,10 +478,10 @@ module carma_types_mod
     integer                                       :: f_minsubsteps 
     integer                                       :: f_maxretries
     integer                                       :: f_maxntsubsteps_cap
-    logical                                       :: f_do_implicit_gas    ! solve gas depletion implicitly with the particles
-    real(kind=f)                                  :: f_implicit_trigger   ! relative gas change above which the implicit solve runs
-    real(kind=f)                                  :: f_implicit_rtol      ! relative tolerance on the implicit gas fixed point
-    integer                                       :: f_implicit_maxit     ! Newton iteration cap for the implicit gas solve
+    logical                                       :: f_do_implicit_gas
+    real(kind=f)                                  :: f_implicit_trigger
+    real(kind=f)                                  :: f_implicit_rtol
+    integer                                       :: f_implicit_maxit
     integer                                       :: f_ifall
     integer                                       :: f_icoagop
     integer                                       :: f_icollec
@@ -443,18 +490,12 @@ module carma_types_mod
     integer                                       :: f_itbnd_gc
     integer                                       :: f_ibbnd_gc
     integer, allocatable, dimension(:,:)          :: f_inucgas      ! (NELEM, NELEM)
-    real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NELEM, NELEM): (seed elem, target elem)
-    ! Many-to-many gas depletion: each group may deplete several gases.
-    !   nu_dep       stoichiometric coefficient of gas in the group's condensation reaction
-    !   dgas_dcond   g of gas consumed per g of condensate formed {CARMA_InitializeGrowth}
-    !   ndepgas      number of gases the group depletes
-    !   idepgas      compressed indices of the depleted gases
+    real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NELEM,NELEM)
     integer, allocatable, dimension(:,:)          :: f_nu_dep       ! (NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:)     :: f_dgas_dcond   ! (NGROUP,NGAS)
     integer, allocatable, dimension(:)            :: f_ndepgas      ! (NGROUP)
     integer, allocatable, dimension(:,:)          :: f_idepgas      ! (NGAS,NGROUP)
-    real(kind=f), allocatable, dimension(:,:)     :: f_xref         ! (NGROUP,NGAS) reference mass mixing ratio of each
-                                                                    ! secondary reactant in the condensate's vapor-pressure fit
+    real(kind=f), allocatable, dimension(:,:)     :: f_xref         ! (NGROUP,NGAS)
     integer, allocatable, dimension(:)            :: f_igrowgas     ! NELEM
     integer, allocatable, dimension(:)            :: f_nnuc2elem    ! NELEM
     integer, allocatable, dimension(:)            :: f_ievp2elem    ! NELEM
@@ -535,9 +576,10 @@ module carma_types_mod
     !
     !   rlh_nuc   Latent heat released by nucleation [cm^2/s^2]       {setupaer}
     !   pratt     Terms in PPM advection scheme for condensation      {setupgkern}
-    !   prat
-    !   pden1
-    !   palr
+    !   prat      Terms in PPM advection scheme for condensation      {setupgkern}
+    !   pden1     Terms in PPM advection scheme for condensation      {setupgkern}
+    !   palr      Terms in PPM advection scheme for condensation      {setupgkern}
+    !
     real(kind=f), allocatable, dimension(:,:)        :: f_rlh_nuc    ! (NELEM,NELEM)
     real(kind=f), allocatable, dimension(:,:,:)      :: f_pratt      ! (3,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)      :: f_prat       ! (4,NBIN,NGROUP)
@@ -579,7 +621,10 @@ module carma_types_mod
   !! directly.
   type, public :: carmastate_type
   
-    ! Parent CARMA object
+    ! Parent object
+    !
+    !   carma     The CARMA object this state belongs to
+    !
     type(carma_type), pointer                   :: f_carma
 
     ! Model Dimensions
@@ -605,10 +650,12 @@ module carma_types_mod
     real(kind=f)                                  :: f_dtime_orig
     real(kind=f)                                  :: f_nretries
 
+    !   max_nsubstep Maximum number of substeps in a step
     !   max_nretry  Maximum number of retries in a step
     !   nstep       Total number of steps taken
     !   nsubstep    Total number of substeps taken
     !   nretry      Total number of retries taken
+    !   zsubsteps   Number of substeps taken at each level in the last step
     integer                                       :: f_max_nsubstep
     real(kind=f)                                  :: f_max_nretry
     real(kind=f)                                  :: f_nstep
@@ -707,6 +754,7 @@ module carma_types_mod
     !   coagprod    Particle production rate due to coagulation for diagnostic		!PETER
     !   coagloss    Particle loss rate due to coagulation for diagnostic		!PETER
     !   rnuclg      Total particle loss rate due to nucleation for group
+    !   rnuclgsum   rnuclg summed over the groups nucleated into
     !   rnucpe      Particle production due to nucleation 
     !   rnucpeup    Particle production due to nucleation (before calling downgxfer.F90)  !PETER
     !   rhompe      Particle production due to homogeneous nucleation 
@@ -722,6 +770,12 @@ module carma_types_mod
     !   evdrop      Particle production of droplet number
     !   evcore      Particle production of core elements
     !   gasprod     Gas production term
+    !   redugrow    Nucleation-rate reduction factor per gas (set to 1; only sulfnucrate applies it)
+    !   gasprod_tot, rnucpeup_tot, rhompe_tot, growpe_tot, rnuclg_tot, growlg_tot,
+    !   rnucpe_tot, evaplg_tot, evappe_tot
+    !               The corresponding rates accumulated over the substeps of a step  {newstate}   !PETER
+    !   phochemprod      Photochemical particle production rate
+    !   phochemprod_gas  Photochemical gas production rate
     !   rlheat      Latent heating rate (per step) [deg_K/s]   
     !   ftoppart    Downward particle flux across top boundary of model
     !   fbotpart    Upward flux particle across bottom boundary of model
@@ -758,7 +812,7 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagprod   ! (NZ,NBIN,NELEM)		!PETER
     real(kind=f), allocatable, dimension(:,:,:)   :: f_coagloss   ! (NZ,NBIN,NELEM)		!PETER
     real(kind=f), allocatable, dimension(:,:,:,:) :: f_rnuclg     ! (NBIN,NGROUP,NGROUP,NZ)
-    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnuclgsum  ! (NBIN,NGROUP,NZ) sum of rnuclg over "into" groups
+    real(kind=f), allocatable, dimension(:,:,:)   :: f_rnuclgsum  ! (NBIN,NGROUP,NZ)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_rnucpe     ! (NBIN,NELEM,NZ)
     real(kind=f), allocatable, dimension(:,:,:)   :: f_rnucpeup   ! (NBIN,NELEM,NZ)        !PETER
     real(kind=f), allocatable, dimension(:,:,:)   :: f_rhompe     ! (NBIN,NELEM,NZ)
@@ -852,6 +906,10 @@ module carma_types_mod
     !  thcond_1  Coefficient to linear thermal conductivity term [ergs/s/cm/K^2]
     !  thcond_2  Coefficient to quadratic thermal conductivity term [ergs/s/cm/K^3]
     !  CP        The specific heat capacity at constant pressure of dy air [cm^2 / s^2 / K]
+    !  wtmol_air Molecular weight of air at layer mid-pt [g/mol]
+    !  grav      Gravitational acceleration at layer mid-pt [cm/s^2]
+    !  met       Metallicity [Fe/H]
+    !  t0        Temperature at the lowest pressure level, for sigma coordinates [K]
     real(kind=f), allocatable, dimension(:)     :: f_rhoa       ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_rhoa_wet   ! (NZ)
     real(kind=f), allocatable, dimension(:)     :: f_t          ! (NZ)
@@ -884,8 +942,8 @@ module carma_types_mod
     ! implemented as F90 and values as passed as parameters between subroutines.
     !
     !   diffus    Diffusivity of gas in air [cm^2/s]                  {setupgrow}
-    !   rlhe      Latent heat of evaporation for gas [cm^2/s^2]       {setupgrow}
-    !   rlhm      Latent heat of ice melting for gas [cm^2/s^2]       {setupgrow}
+    !   rlhe      Latent heat of evaporation for group [cm^2/s^2]     {setupgrow}
+    !   rlhm      Latent heat of ice melting for group [cm^2/s^2]     {setupgrow}
     !   pvapl     Saturation vapor pressure over water [dyne/cm^2]    {vaporp}   
     !   pvapi     Saturation vapor pressure over ice [dyne/cm^2]      {vaporp}   
     !   surfctwa  Surface tension of water-air interface              {setupgkern}
@@ -893,9 +951,14 @@ module carma_types_mod
     !   surfctia  Surface tension of ice-air interface                {setupgkern}
     !   akelvin   Exponential arg. in curvature term for growth       {setupgkern}
     !   akelvini  Curvature term for ice                              {setupgkern}
+    !   surfacetens Surface tension of the condensate [dyne/cm]       {setupgkern}
+    !   desorption Desorption energy of the condensate [eV]           {setupgkern}
     !   ft        Ventilation factor                                  {setupgkern}
     !   gro       Growth kernel [UNITS?]                              {setupgkern}
     !   gro1      Growth kernel conduction term [UNITS?]              {setupgkern}
+    !   grok      Growth kernel with each secondary gas as the key     {setupgkern}
+    !   gro1k     Growth kernel conduction term with each secondary gas as the key {setupgkern}
+    !   ikey      Active key reactant of each condensate               {microfast_implicit}
     !   gro2      Growth kernel radiation term [UNITS?]               {setupgkern}
     !   supsatl   Supersaturation of vapor w.r.t. liquid water [dimless]
     !   supsati   Supersaturation of vapor w.r.t. ice [dimless]                  
@@ -923,9 +986,9 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:,:)  :: f_ft         ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)  :: f_gro        ! (NZ,NBIN,NGROUP)
     real(kind=f), allocatable, dimension(:,:,:)  :: f_gro1       ! (NZ,NBIN,NGROUP)
-    real(kind=f), allocatable, dimension(:,:,:,:) :: f_grok      ! (NZ,NBIN,NGROUP,NGAS) growth kernel with gas as key
-    real(kind=f), allocatable, dimension(:,:,:,:) :: f_gro1k     ! (NZ,NBIN,NGROUP,NGAS) conduction term with gas as key
-    integer, allocatable, dimension(:,:)          :: f_ikey      ! (NZ,NGROUP) active key reactant of each condensate
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_grok      ! (NZ,NBIN,NGROUP,NGAS)
+    real(kind=f), allocatable, dimension(:,:,:,:) :: f_gro1k     ! (NZ,NBIN,NGROUP,NGAS)
+    integer, allocatable, dimension(:,:)          :: f_ikey      ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:)    :: f_gro2       ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsatl    ! (NZ,NGROUP)
     real(kind=f), allocatable, dimension(:,:)    :: f_supsati    ! (NZ,NGROUP)
