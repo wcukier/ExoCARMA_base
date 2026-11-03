@@ -34,7 +34,6 @@ subroutine supersat(carma, cstate, iz, igroup, rc)
   real(kind=f)  :: gc_cgs
   real(kind=f)  :: alpha
   integer       :: igas    !! key gas of this condensate
-  integer       :: j       !! depleted-gas list index
   integer       :: jgas    !! secondary reactant
   real(kind=f)  :: act     !! activity factor of the secondary reactants
   real(kind=f)  :: expo
@@ -90,8 +89,8 @@ subroutine supersat(carma, cstate, iz, igroup, rc)
   ! j, since the vapor-pressure fit assumes each at its reference abundance
   ! x_ref,j.
   act = 1._f
-  do j = 1, carma%f_ndepgas(igroup)
-    jgas = carma%f_idepgas(j, igroup)
+  do jgas = 1, NGAS
+    if (carma%f_dgas_dcond(igroup, jgas) == 0._f) cycle
     if (jgas == igas) cycle
     if (xref(igroup, jgas) <= 0._f) cycle
     x    = max(gc(iz,jgas), 0._f) / rhoa(iz) / xref(igroup, jgas)

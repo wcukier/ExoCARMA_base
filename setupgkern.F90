@@ -554,13 +554,13 @@ contains
   !! molecular weight and air-density column, and the latent heat expressed
   !! per gram of that reactant.
   subroutine candidate_kernels()
-    integer      :: jd, jgas, kk, ii
+    integer      :: jgas, kk, ii
     real(kind=f) :: dj(NZ), fpj(NZ), fptj(NZ)
     real(kind=f) :: rlhj, brj, rkn, rknt, rl, rlt, d1, t1, rsh, sc, pr, y1, y2, fvj, ftj
     real(kind=f), parameter :: COLINT = 1._f   ! collision integral, as in setupgrow
 
-    do jd = 1, carma%f_ndepgas(igroup)
-      jgas = carma%f_idepgas(jd, igroup)
+    do jgas = 1, NGAS
+      if (carma%f_dgas_dcond(igroup, jgas) == 0._f) cycle
       if (jgas == igas) cycle
 
       if (diffus(1,jgas) > 0._f) then

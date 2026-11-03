@@ -424,11 +424,10 @@ module carma_types_mod
     !               (seed element, target element)                        {CARMA_AddNucleation}
     !   nu_dep      Stoichiometric coefficient of a gas in a group's condensation
     !               reaction                                              {CARMA_AddGasDepletion}
-    !   dgas_dcond  Mass of gas consumed per mass of condensate formed [g/g] {CARMA_InitializeGrowth}
-    !   ndepgas     Number of gases a group depletes                      {CARMA_InitializeGrowth}
-    !   idepgas     Indices of the gases a group depletes                 {CARMA_InitializeGrowth}
+    !   dgas_dcond  Mass of gas consumed per mass of condensate formed [g/g]; nonzero
+    !               exactly for the gases a group depletes                {CARMA_InitializeGrowth}
     !   xref        Reference mass mixing ratio of each secondary reactant in the
-    !               condensate's vapor-pressure fit [g/g]                 {CARMA_SetGasReference}
+    !               condensate's vapor-pressure fit [g/g]                 {CARMA_AddGasDepletion}
     !   nnucelem    Number of elements that nucleate into an element      {CARMA_InitializeGrowth}
     !   inucelem    Elements that nucleate into an element                {CARMA_InitializeGrowth}
     !   nnucbin     Number of source bins that nucleate into a target bin {CARMA_InitializeGrowth}
@@ -493,8 +492,6 @@ module carma_types_mod
     real(kind=f), allocatable, dimension(:,:)     :: f_mucos        ! (NELEM,NELEM)
     integer, allocatable, dimension(:,:)          :: f_nu_dep       ! (NGROUP,NGAS)
     real(kind=f), allocatable, dimension(:,:)     :: f_dgas_dcond   ! (NGROUP,NGAS)
-    integer, allocatable, dimension(:)            :: f_ndepgas      ! (NGROUP)
-    integer, allocatable, dimension(:,:)          :: f_idepgas      ! (NGAS,NGROUP)
     real(kind=f), allocatable, dimension(:,:)     :: f_xref         ! (NGROUP,NGAS)
     integer, allocatable, dimension(:)            :: f_igrowgas     ! NELEM
     integer, allocatable, dimension(:)            :: f_nnuc2elem    ! NELEM

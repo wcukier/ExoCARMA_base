@@ -40,7 +40,6 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlh
   integer                              :: ibin    ! bin index
   integer                              :: ielem   ! element index
   integer                              :: i
-  integer                              :: j       ! depleted-gas list index
   integer                              :: jgas    ! depleted gas index
   integer                              :: jgroup  ! group of the volatile core
   real(kind=f)                         :: coremass
@@ -106,15 +105,15 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlh
           ! Charge every gas the group depletes; count the latent heat once,
           ! per mass of key gas.
           if (is_grp_ice(igroup)) then
-            do j = 1, carma%f_ndepgas(igroup)
-              jgas = carma%f_idepgas(j, igroup)
+            do jgas = 1, NGAS
+              if (carma%f_dgas_dcond(igroup, jgas) == 0._f) cycle
               total_ice(jgas) = total_ice(jgas) + volatilemass * carma%f_dgas_dcond(igroup, jgas)
             end do
             total_rlheat = total_rlheat + volatilemass * sto_vol &
                          * (rlhe(iz,igroup) + rlhm(iz,igroup))
           else
-            do j = 1, carma%f_ndepgas(igroup)
-              jgas = carma%f_idepgas(j, igroup)
+            do jgas = 1, NGAS
+              if (carma%f_dgas_dcond(igroup, jgas) == 0._f) cycle
               total_liquid(jgas) = total_liquid(jgas) + volatilemass * carma%f_dgas_dcond(igroup, jgas)
             end do
             total_rlheat = total_rlheat + volatilemass * sto_vol * rlhe(iz,igroup)
@@ -122,15 +121,15 @@ subroutine totalcondensate(carma, cstate, iz, total_ice, total_liquid, total_rlh
         end if
 	if (igascore > 0) then
 	  if (is_grp_ice(jgroup)) then
-            do j = 1, carma%f_ndepgas(jgroup)
-              jgas = carma%f_idepgas(j, jgroup)
+            do jgas = 1, NGAS
+              if (carma%f_dgas_dcond(jgroup, jgas) == 0._f) cycle
               total_ice(jgas) = total_ice(jgas) + coremass * carma%f_dgas_dcond(jgroup, jgas)
             end do
             total_rlheat = total_rlheat + coremass * sto_core &
                          * (rlhe(iz,jgroup) + rlhm(iz,jgroup))
           else
-            do j = 1, carma%f_ndepgas(jgroup)
-              jgas = carma%f_idepgas(j, jgroup)
+            do jgas = 1, NGAS
+              if (carma%f_dgas_dcond(jgroup, jgas) == 0._f) cycle
               total_liquid(jgas) = total_liquid(jgas) + coremass * carma%f_dgas_dcond(jgroup, jgas)
             end do
             total_rlheat = total_rlheat + coremass * sto_core * rlhe(iz,jgroup)

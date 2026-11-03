@@ -39,7 +39,6 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
   integer                        :: inuc
   integer                        :: ienucto
   integer                        :: ibin_small(NGROUP)
-  integer                        :: j       ! depleted-gas list index
   integer                        :: jgas    ! depleted gas
   real(kind=f)                   :: g0
   real(kind=f)                   :: g1
@@ -152,8 +151,8 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
                 ! Gas exhaustion: limit condensation in one substep to a
                 ! fraction DT_SAFETY of each gas the group depletes.
                 if (ss > 0._f) then
-                do j = 1, carma%f_ndepgas(ig)
-                  jgas = carma%f_idepgas(j, ig)
+                do jgas = 1, NGAS
+                  if (carma%f_dgas_dcond(ig, jgas) == 0._f) cycle
                   demand = dmdt * pconmax(iz,ig) * carma%f_dgas_dcond(ig, jgas)
                   if (demand > 0._f .and. gc(iz,jgas) > 0._f) then
                     dt_exh = min( dt_exh, DT_SAFETY * gc(iz,jgas) / demand )

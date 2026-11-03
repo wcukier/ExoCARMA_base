@@ -491,20 +491,20 @@ contains
   subroutine select_keys(gk, changed)
     real(kind=f), intent(in) :: gk(NGAS)
     logical, intent(out)     :: changed
-    integer                  :: ig, jd, jg, ifit, icur, ibest
+    integer                  :: ig, jg, ifit, icur, ibest
     real(kind=f)             :: scur, sbest, sj
 
     changed = .false.
     do ig = 1, NGROUP
       ifit = igrowgas(ienconc(ig))
       if (ifit == 0) cycle
-      if (carma%f_ndepgas(ig) < 2) cycle
+      if (count(carma%f_dgas_dcond(ig, :) /= 0._f) < 2) cycle
       icur  = ikey(iz,ig)
       scur  = supply(ig, icur, gk)
       ibest = icur
       sbest = scur
-      do jd = 1, carma%f_ndepgas(ig)
-        jg = carma%f_idepgas(jd, ig)
+      do jg = 1, NGAS
+        if (carma%f_dgas_dcond(ig, jg) == 0._f) cycle
         if ((jg /= ifit) .and. (xref(ig, jg) <= 0._f)) cycle
         sj = supply(ig, jg, gk)
         if (sj < sbest) then

@@ -102,7 +102,6 @@ module carma_mod
   public CARMA_AddCoagulation
   public CARMA_AddGrowth
   public CARMA_AddGasDepletion
-  public CARMA_SetGasReference
   public CARMA_AddNucleation
   public CARMA_Create
   public CARMA_Destroy
@@ -302,8 +301,6 @@ contains
         carma%f_mucos(NELEM,NELEM), &
         carma%f_nu_dep(NGROUP,NGAS), &
         carma%f_dgas_dcond(NGROUP,NGAS), &
-        carma%f_ndepgas(NGROUP), &
-        carma%f_idepgas(NGAS,NGROUP), &
         carma%f_xref(NGROUP,NGAS), &
         stat=ier) 
       if(ier /= 0) then
@@ -315,8 +312,6 @@ contains
       carma%f_mucos(:,:) = 0._f
       carma%f_nu_dep(:,:) = 0
       carma%f_dgas_dcond(:,:) = 0._f
-      carma%f_ndepgas(:) = 0
-      carma%f_idepgas(:,:) = 0
       carma%f_xref(:,:) = 0._f
     end if
     
@@ -974,13 +969,11 @@ contains
           carma%f_nu_dep(igroup, igas) = carma%f_group(igroup)%f_stofact
         end if
 
-        carma%f_ndepgas(igroup) = 0
+        carma%f_dgas_dcond(igroup, :) = 0._f
         do igas = 1, carma%f_NGAS
           if (carma%f_nu_dep(igroup, igas) /= 0) then
             carma%f_dgas_dcond(igroup, igas) = carma%f_gas(igas)%f_wtmol_dif &
               / carma%f_group(igroup)%f_wtmol * carma%f_nu_dep(igroup, igas)
-            carma%f_ndepgas(igroup) = carma%f_ndepgas(igroup) + 1
-            carma%f_idepgas(carma%f_ndepgas(igroup), igroup) = igas
           end if
         end do
       end do
@@ -1245,8 +1238,6 @@ contains
           carma%f_mucos, &
           carma%f_nu_dep, &
           carma%f_dgas_dcond, &
-          carma%f_ndepgas, &
-          carma%f_idepgas, &
           carma%f_xref, &
           stat=ier) 
         if(ier /= 0) then
@@ -1405,13 +1396,19 @@ contains
   !! the secondary gases of a multi-educt reaction (e.g. Mg for MgSiO3 when
   !! SiO is the key gas).
   !!
+  !! <i>xref</i> is the mass mixing ratio of the gas implicit in the group's
+  !! vapor-pressure fit.  The condensate's supersaturation scales with the
+  !! gas's activity relative to it; without it (or with 0) the gas does not
+  !! scale the supersaturation and cannot become the key reactant.
+  !!
   !! @see CARMA_AddGrowth
-  subroutine CARMA_AddGasDepletion(carma, igroup, igas, nu, rc)
+  subroutine CARMA_AddGasDepletion(carma, igroup, igas, nu, rc, xref)
     type(carma_type), intent(inout)    :: carma    !! the carma object
     integer, intent(in)                :: igroup   !! the group index
     integer, intent(in)                :: igas     !! the gas index
     integer, intent(in)                :: nu       !! stoichiometric coefficient of the gas
     integer, intent(out)               :: rc       !! return code, negative indicates failure
+    real(kind=f), intent(in), optional :: xref     !! reference mass mixing ratio [g/g], default 0
 
     ! Assume success.
     rc = RC_OK
@@ -1437,33 +1434,21 @@ contains
       return
     end if
 
+    if (present(xref)) then
+      if (xref < 0._f) then
+        if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddGasDepletion:: ERROR - The reference ", &
+          "abundance (", xref, ") must be non-negative."
+        rc = RC_ERROR
+        return
+      end if
+      carma%f_xref(igroup, igas) = xref
+    end if
+
     carma%f_nu_dep(igroup, igas) = nu
 
     return
   end subroutine CARMA_AddGasDepletion
 
-  !! Record the reference abundance of a secondary reactant: the mass mixing
-  !! ratio of gas <i>igas</i> implicit in the vapor-pressure fit of group
-  !! <i>igroup</i>.  The condensate's supersaturation scales with the
-  !! activity of each secondary reactant relative to this reference.
-  subroutine CARMA_SetGasReference(carma, igroup, igas, xref_in, rc)
-    type(carma_type), intent(inout)    :: carma    !! the carma object
-    integer, intent(in)                :: igroup   !! the group index
-    integer, intent(in)                :: igas     !! the gas index
-    real(kind=f), intent(in)           :: xref_in  !! reference mass mixing ratio [g/g]
-    integer, intent(out)               :: rc       !! return code, negative indicates failure
-
-    rc = RC_OK
-
-    if ((igroup > carma%f_NGROUP) .or. (igas > carma%f_NGAS) .or. (xref_in < 0._f)) then
-      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_SetGasReference:: ERROR - invalid group (", &
-        igroup, "), gas (", igas, ") or reference (", xref_in, ")."
-      rc = RC_ERROR
-      return
-    end if
-
-    carma%f_xref(igroup, igas) = xref_in
-  end subroutine CARMA_SetGasReference
     
   !! Add a nucleation process that nucleates one element (<i>elemfrom</i>) to another element (<i>elemto</i>)
   !! using the specified gas (<i>igas</i>). The elements and gas should have already been defined
