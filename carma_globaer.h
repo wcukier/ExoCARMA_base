@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! CARMA Type aliases
 ! ---------------------
 ! This file containts shortcut names that map the variable names that
@@ -69,9 +71,7 @@
 
 ! Gas object
 #define gasname(igas)         carma%f_gas(igas)%f_name
-#define gwtmol(igas)          carma%f_gas(igas)%f_wtmol
-#define gwtmol_dif(igas)        carma%f_gas(igas)%f_wtmol_dif
-#define ivaprtn(igas)         carma%f_gas(igas)%f_ivaprtn
+#define gwtmol_dif(igas)      carma%f_gas(igas)%f_wtmol_dif
 #define igcomp(igas)          carma%f_gas(igas)%f_icomposition
 #define dgc_threshold(igas)   carma%f_gas(igas)%f_dgc_threshold
 #define ds_threshold(igas)    carma%f_gas(igas)%f_ds_threshold
@@ -116,6 +116,10 @@
 #define do_mie(igroup)          carma%f_group(igroup)%f_do_mie
 #define imiertn(igroup)         carma%f_group(igroup)%f_imiertn
 #define dpc_threshold(igroup)   carma%f_group(igroup)%f_dpc_threshold
+! Condensate properties (per group; the gas carries only gas-phase properties)
+#define gwtmol(igroup)          carma%f_group(igroup)%f_wtmol
+#define gwtmol_core(igroup)     carma%f_group(igroup)%f_wtmol_core
+#define ivaprtn(igroup)         carma%f_group(igroup)%f_ivaprtn
 
 ! Solute object
 #define solname(isolute)      carma%f_solute(isolute)%f_name
@@ -142,6 +146,7 @@
 #define do_step       carma%f_do_step
 #define do_substep    carma%f_do_substep
 #define do_thermo     carma%f_do_thermo
+#define do_cons_evap  carma%f_do_cons_evap
 #define do_vdiff      carma%f_do_vdiff
 #define do_vtran      carma%f_do_vtran
 #define do_drydep     carma%f_do_drydep
@@ -156,6 +161,15 @@
 #define maxsubsteps   carma%f_maxsubsteps
 #define minsubsteps   carma%f_minsubsteps
 #define maxretries    carma%f_maxretries
+#define maxntsubsteps_cap  carma%f_maxntsubsteps_cap
+#define do_implicit_gas    carma%f_do_implicit_gas
+#define implicit_trigger   carma%f_implicit_trigger
+#define implicit_rtol      carma%f_implicit_rtol
+#define implicit_maxit     carma%f_implicit_maxit
+#define xref               carma%f_xref
+#define ikey               cstate%f_ikey
+#define grok               cstate%f_grok
+#define gro1k              cstate%f_gro1k
 #define ifall         carma%f_ifall
 #define icoagop       carma%f_icoagop
 #define icollec       carma%f_icollec

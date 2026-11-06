@@ -15,7 +15,7 @@ carmastate_mod.o carma_mod.o coagl.o coagp.o csolve.o setupbins.o \
 setupatm.o setupvf.o microslow.o newstate.o prestep.o setupckern.o \
 setupcoag.o smallconc.o step.o supersat.o vaporp.o vertadv.o \
 vertdif.o vertical.o versol.o rhopart.o psolve.o zeromicro.o \
-nsubsteps.o setupgrow.o setupgkern.o setupnuc.o growevapl.o microfast.o \
+nsubsteps.o setupgrow.o setupgkern.o setupnuc.o growevapl.o microfast.o microfast_implicit.o \
 gsolve.o actdropl.o growp.o downgxfer.o \
 upgxfer.o downgevapply.o evapp.o evap_poly.o evap_mono.o \
 evap_ingrp.o tsolve.o miess.o vaporp_h2o_buck1981.o wetr.o \
@@ -28,7 +28,9 @@ vaporp_s2_lyons2008.o vaporp_kcl_morley2012.o vaporp_zns_morley2012.o \
 vaporp_na2s_morley2012.o vaporp_mns_morley2012.o vaporp_cr_morley2012.o \
 vaporp_fe_visscher2010.o vaporp_mg2sio4_visscher2010.o vaporp_s8_zahnle2016.o \
 vaporp_tio2_lodders1999.o vaporp_tio2_helling2001.o vaporp_al2o3_wakeford2017.o \
-vaporp_co_wylie1958.o vaporp_user.o sulfate_utils.o sulfnuc.o sulfnucrate.o setupedif.o vertgas.o homnucgen.o 
+vaporp_co_wylie1958.o vaporp_user.o sulfate_utils.o sulfnuc.o sulfnucrate.o setupedif.o vertgas.o homnucgen.o \
+carma_planck.o carma_ckopacity.o carma_rtsolve.o carma_cloudopt.o carma_linalg.o \
+carma_rayleigh.o carma_swsolve.o carma_rce.o
 
 #freezglaerl_murray2010.o freezaerl_tabazadeh2000.o freezaerl_koop2000.o \
 #freezaerl_mohler2010.o freezdropl.o hetnucl.o melticel.o gasexchange.o \
@@ -59,6 +61,36 @@ vaporp_co_wylie1958.html vaporp_user.html sulfate_utils.html sulfnuc.html sulfnu
 #freezaerl_mohler2010.html freezdropl.html hetnucl.html melticel.html gasexchange.html \
 
 carma_precision_mod.o : carma_precision_mod.F90
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# Radiative transfer modules. These depend only on the precision module so
+# they can be compiled standalone.
+carma_planck.o : carma_planck.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_ckopacity.o : carma_ckopacity.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_rtsolve.o : carma_rtsolve.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_cloudopt.o : carma_cloudopt.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_linalg.o : carma_linalg.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_rayleigh.o : carma_rayleigh.F90 carma_precision_mod.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+# The shortwave solver uses dtridgl from carma_rtsolve.
+carma_swsolve.o : carma_swsolve.F90 carma_precision_mod.mod carma_rtsolve.mod
+	$(FORTRAN) $(FFLAGS) -c $<
+
+carma_rce.o : carma_rce.F90 carma_precision_mod.mod carma_enums_mod.mod \
+              carma_planck.mod carma_ckopacity.mod carma_cloudopt.mod \
+              carma_rtsolve.mod carma_linalg.mod carma_rayleigh.mod \
+              carma_swsolve.mod
 	$(FORTRAN) $(FFLAGS) -c $<
 
 carma_enums_mod.o : carma_enums_mod.F90
@@ -179,6 +211,9 @@ maxconc.o : maxconc.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_t
 #	$(FORTRAN) $(FFLAGS) -c $<
 
 microfast.o : microfast.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	
+	$(FORTRAN) $(FFLAGS) -c $<
+
+microfast_implicit.o : microfast_implicit.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	
 	$(FORTRAN) $(FFLAGS) -c $<
 
 microslow.o : microslow.F90 carma_globaer.h carma_mod.mod carmastate_mod.mod carma_types_mod.mod carma_planet_mod.mod carma_condensate_mod.mod carma_constants_mod.mod carma_enums_mod.mod carma_precision_mod.mod	

@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 !! The CARMA module contains an interface to the Community Aerosol and Radiation
 !! Model for Atmospheres (CARMA) bin microphysical model [Turco et al. 1979; 
 !! Toon et al. 1988]. This implementation has been customized to work within
@@ -99,6 +101,7 @@ module carma_mod
   ! Declare the public methods.
   public CARMA_AddCoagulation
   public CARMA_AddGrowth
+  public CARMA_AddGasDepletion
   public CARMA_AddNucleation
   public CARMA_Create
   public CARMA_Destroy
@@ -295,7 +298,10 @@ contains
     if (NGAS > 0) then
       allocate( &
         carma%f_gas(NGAS), &
-        carma%f_mucos(NGAS,NGROUP), &
+        carma%f_mucos(NELEM,NELEM), &
+        carma%f_nu_dep(NGROUP,NGAS), &
+        carma%f_dgas_dcond(NGROUP,NGAS), &
+        carma%f_xref(NGROUP,NGAS), &
         stat=ier) 
       if(ier /= 0) then
         if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_Create: ERROR allocating gases, NGAS=", &
@@ -304,6 +310,9 @@ contains
         return
       endif
       carma%f_mucos(:,:) = 0._f
+      carma%f_nu_dep(:,:) = 0
+      carma%f_dgas_dcond(:,:) = 0._f
+      carma%f_xref(:,:) = 0._f
     end if
     
     ! Allocate tables for optical properties, if any are needed.
@@ -343,9 +352,11 @@ contains
   !!  @author  Chuck Bardeen 
   subroutine CARMA_Initialize(carma, rc, do_cnst_rlh, do_coag, do_detrain, do_fixedinit, &
       do_grow, do_incloud, do_explised, do_print_init, do_substep, do_thermo, do_vdiff, &
-      do_vtran, do_drydep, vf_const, minsubsteps, maxsubsteps, maxretries, conmax, &
+      do_vtran, do_drydep, vf_const, minsubsteps, maxsubsteps, maxretries, &
+      maxntsubsteps_cap, conmax, &
       do_pheat, do_pheatatm, dt_threshold, cstick, gsticki, gstickl, tstick, itbnd_pc, &
-      ibbnd_pc, itbnd_gc, ibbnd_gc, do_t_evolves)
+      ibbnd_pc, itbnd_gc, ibbnd_gc, do_t_evolves, do_cons_evap, &
+      do_implicit_gas, implicit_trigger, implicit_rtol, implicit_maxit)
     type(carma_type), intent(inout)     :: carma         !! the carma object
     integer, intent(out)                :: rc            !! return code, negative indicates failure
     logical, intent(in), optional       :: do_cnst_rlh   !! use constant values for latent heats (instead of varying with temperature)?
@@ -365,6 +376,7 @@ contains
     integer, intent(in), optional       :: minsubsteps   !! minimum number of substeps, default = 1
     integer, intent(in), optional       :: maxsubsteps   !! maximum number of substeps, default = 1
     integer, intent(in), optional       :: maxretries    !! maximum number of substep retries, default = 5
+    integer, intent(in), optional       :: maxntsubsteps_cap !! hard cap on the substep count a retry may request, default = 16384
     real(kind=f), intent(in), optional  :: conmax        !! minimum relative concentration to consider, default = 1e-1
     logical, intent(in), optional       :: do_pheat      !! do particle heating
     logical, intent(in), optional       :: do_pheatatm   !! do particle heating of atmosphere
@@ -378,6 +390,11 @@ contains
     integer, intent(in), optional       :: itbnd_gc      !! top boundary condition for gases
     integer, intent(in), optional       :: ibbnd_gc      !! bottom boundary condition for gases
     logical, intent(in), optional       :: do_t_evolves  !! .true. if T evolves between steps (disables setupgkern caching)
+    logical, intent(in), optional       :: do_cons_evap  !! .true. to bound explicit evaporation production by the donor bin's implicit loss
+    logical, intent(in), optional       :: do_implicit_gas  !! .true. to solve gas depletion implicitly with the particles, default = .false.
+    real(kind=f), intent(in), optional  :: implicit_trigger !! relative gas change in one substep that triggers the implicit solve, default = 0.1
+    real(kind=f), intent(in), optional  :: implicit_rtol    !! relative tolerance on the implicit gas fixed point, default = 1e-6
+    integer, intent(in), optional       :: implicit_maxit   !! Newton iteration cap for the implicit gas solve, default = 20
 
     ! Assume success.
     rc = RC_OK
@@ -395,6 +412,7 @@ contains
     carma%f_do_print_init = .FALSE.
     carma%f_do_substep    = .FALSE.
     carma%f_do_t_evolves  = .FALSE.
+    carma%f_do_cons_evap  = .FALSE.
     carma%f_do_thermo     = .FALSE.
     carma%f_do_vdiff      = .FALSE.
     carma%f_do_vtran      = .FALSE.
@@ -422,6 +440,7 @@ contains
     if (present(do_print_init)) carma%f_do_print_init = (do_print_init .and. carma%f_do_print)
     if (present(do_substep))    carma%f_do_substep    = do_substep
     if (present(do_t_evolves))  carma%f_do_t_evolves  = do_t_evolves
+    if (present(do_cons_evap))  carma%f_do_cons_evap  = do_cons_evap
     if (present(do_thermo))     carma%f_do_thermo     = do_thermo
     if (present(do_vdiff))      carma%f_do_vdiff      = do_vdiff
     if (present(do_vtran))      carma%f_do_vtran      = do_vtran 
@@ -441,11 +460,25 @@ contains
     carma%f_minsubsteps = 1         ! minimum number of substeps
     carma%f_maxsubsteps = 1         ! maximum number of substeps
     carma%f_maxretries  = 1         ! maximum number of retries
+    carma%f_maxntsubsteps_cap = 16384  ! hard cap on the substep count a retry may request
     carma%f_conmax      = 1.e-1_f
-    
+
     if (present(minsubsteps)) carma%f_minsubsteps = minsubsteps
     if (present(maxsubsteps)) carma%f_maxsubsteps = maxsubsteps
     if (present(maxretries))  carma%f_maxretries  = maxretries
+    if (present(maxntsubsteps_cap)) carma%f_maxntsubsteps_cap = maxntsubsteps_cap
+
+    ! Implicit gas depletion
+    carma%f_do_implicit_gas  = .FALSE.
+    carma%f_implicit_trigger = 0.1_f
+    carma%f_implicit_rtol    = 1.e-6_f
+    carma%f_implicit_maxit   = 20
+
+    if (present(do_implicit_gas))  carma%f_do_implicit_gas  = do_implicit_gas
+    if (present(implicit_trigger)) carma%f_implicit_trigger = implicit_trigger
+    if (present(implicit_rtol))    carma%f_implicit_rtol    = implicit_rtol
+    if (present(implicit_maxit))   carma%f_implicit_maxit   = implicit_maxit
+
     if (present(conmax))      carma%f_conmax      = conmax
 
     carma%f_do_step = .TRUE.
@@ -917,6 +950,35 @@ contains
       return
     end if
 
+    ! Build the gas-depletion tables. Each group depletes its key gas with its
+    ! stofact and any secondary gases registered by CARMA_AddGasDepletion.
+    ! dgas_dcond is the gas mass consumed per unit condensate mass.
+    if (carma%f_NGAS > 0) then
+      do igroup = 1, carma%f_NGROUP
+        ielem = carma%f_group(igroup)%f_ienconc
+        if (ielem == 0) cycle
+        igas = carma%f_igrowgas(ielem)
+        if (igas /= 0) then
+          if ((carma%f_nu_dep(igroup, igas) /= 0) .and. &
+              (carma%f_nu_dep(igroup, igas) /= carma%f_group(igroup)%f_stofact)) then
+            if (carma%f_do_print) write(carma%f_LUNOPRT,*) &
+              'CARMA_InitializeGrowth::ERROR - key-gas depletion coefficient does not match stofact for group ', igroup
+            rc = RC_ERROR
+            return
+          end if
+          carma%f_nu_dep(igroup, igas) = carma%f_group(igroup)%f_stofact
+        end if
+
+        carma%f_dgas_dcond(igroup, :) = 0._f
+        do igas = 1, carma%f_NGAS
+          if (carma%f_nu_dep(igroup, igas) /= 0) then
+            carma%f_dgas_dcond(igroup, igas) = carma%f_gas(igas)%f_wtmol_dif &
+              / carma%f_group(igroup)%f_wtmol * carma%f_nu_dep(igroup, igas)
+          end if
+        end do
+      end do
+    end if
+
     return
   end subroutine CARMA_InitializeGrowth         
 
@@ -1174,6 +1236,9 @@ contains
         deallocate( &
           carma%f_gas, &
           carma%f_mucos, &
+          carma%f_nu_dep, &
+          carma%f_dgas_dcond, &
+          carma%f_xref, &
           stat=ier) 
         if(ier /= 0) then
           if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_Destroy: ERROR deallocating gases, status=", ier
@@ -1322,6 +1387,68 @@ contains
     
     return
   end subroutine CARMA_AddGrowth
+
+
+  !! Register that condensation of group <i>igroup</i> also consumes gas
+  !! <i>igas</i> with stoichiometric coefficient <i>nu</i> (moles of gas per
+  !! mole of condensate).  The key (kinetically limiting) gas is registered
+  !! automatically from the group's growth pathway and stofact; use this for
+  !! the secondary gases of a multi-educt reaction (e.g. Mg for MgSiO3 when
+  !! SiO is the key gas).
+  !!
+  !! <i>xref</i> is the mass mixing ratio of the gas implicit in the group's
+  !! vapor-pressure fit.  The condensate's supersaturation scales with the
+  !! gas's activity relative to it; without it (or with 0) the gas does not
+  !! scale the supersaturation and cannot become the key reactant.
+  !!
+  !! @see CARMA_AddGrowth
+  subroutine CARMA_AddGasDepletion(carma, igroup, igas, nu, rc, xref)
+    type(carma_type), intent(inout)    :: carma    !! the carma object
+    integer, intent(in)                :: igroup   !! the group index
+    integer, intent(in)                :: igas     !! the gas index
+    integer, intent(in)                :: nu       !! stoichiometric coefficient of the gas
+    integer, intent(out)               :: rc       !! return code, negative indicates failure
+    real(kind=f), intent(in), optional :: xref     !! reference mass mixing ratio [g/g], default 0
+
+    ! Assume success.
+    rc = RC_OK
+
+    if (igroup > carma%f_NGROUP) then
+      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddGasDepletion:: ERROR - The specifed group (", &
+        igroup, ") is larger than the number of groups (", carma%f_NGROUP, ")."
+      rc = RC_ERROR
+      return
+    end if
+
+    if (igas > carma%f_NGAS) then
+      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddGasDepletion:: ERROR - The specifed gas (", &
+        igas, ") is larger than the number of gases (", carma%f_NGAS, ")."
+      rc = RC_ERROR
+      return
+    end if
+
+    if (nu <= 0) then
+      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddGasDepletion:: ERROR - The stoichiometric ", &
+        "coefficient (", nu, ") must be positive."
+      rc = RC_ERROR
+      return
+    end if
+
+    if (present(xref)) then
+      if (xref < 0._f) then
+        if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMA_AddGasDepletion:: ERROR - The reference ", &
+          "abundance (", xref, ") must be non-negative."
+        rc = RC_ERROR
+        return
+      end if
+      carma%f_xref(igroup, igas) = xref
+    end if
+
+    carma%f_nu_dep(igroup, igas) = nu
+
+    return
+  end subroutine CARMA_AddGasDepletion
+
     
   !! Add a nucleation process that nucleates one element (<i>elemfrom</i>) to another element (<i>elemto</i>)
   !! using the specified gas (<i>igas</i>). The elements and gas should have already been defined
@@ -1438,12 +1565,8 @@ contains
     ! Set to zero if particles are not subject to nucleation.
     if (present(igas)) then
       carma%f_inucgas(ielemfrom,ielemto) = igas
-      call CARMAELEMENT_Get(carma, ielemfrom, rc, igroup=igroup)
-      if (rc >= RC_OK) then
-        !carma%f_inucgas(igroup) = igas
-        if (present(mucos)) carma%f_mucos(igas,igroup) = mucos
-	 ! write(*,*) igas,igroup,carma%f_mucos(igas,igroup), mucos
-      end if
+      ! Contact angle is keyed by (seed element, target element).
+      if (present(mucos)) carma%f_mucos(ielemfrom,ielemto) = mucos
     end if
 
 

@@ -47,8 +47,8 @@ subroutine mie(carma, miertn, radius, wavelength, m, lqext, lqsca, lasym, rc)
   real(kind=f)                       :: x 
   real(kind=f)                       :: qback 
   real(kind=f)                       :: ctbrqs 
-  real(kind=f)                       :: s1(2*nang-1)
-  real(kind=f)                       :: s2(2*nang-1)
+  complex(kind=f)                    :: s1(2*nang-1)
+  complex(kind=f)                    :: s2(2*nang-1)
       
 
   ! Calculate the wave number.

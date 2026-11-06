@@ -6,7 +6,7 @@
 !!
 !! @author Andy Ackerman
 !! @version Aug-2001
-subroutine evapp(carma, cstate, iz, rc)
+subroutine evapp(carma, cstate, iz, rc, dtime_in)
 
 	! types
   use carma_precision_mod
@@ -24,6 +24,7 @@ subroutine evapp(carma, cstate, iz, rc)
   type(carmastate_type), intent(inout) :: cstate  !! the carma state object
   integer, intent(in)                  :: iz      !! z index
   integer, intent(inout)               :: rc      !! return code, negative indicates failure
+  real(kind=f), intent(in)             :: dtime_in !! thread-local dtime for this substep
 
   ! Local declarations
   integer                              :: ibin    !! bin index
@@ -69,13 +70,19 @@ subroutine evapp(carma, cstate, iz, rc)
         do ibin = 1, NBIN
           evdrop(iz) = pc(iz,ibin,ip)*evaplg(ibin,ig,iz)
 
+          ! Limit the transfer to what the donor bin's implicit loss
+          ! surrenders, pc*L*dt/(1+L*dt).
+          if (do_cons_evap) then
+            evdrop(iz) = evdrop(iz) / (1._f + evaplg(ibin,ig,iz)*dtime_in)
+          end if
+
           ! Check for evaporation of a sufficient number of droplets
 !          if( evdrop(iz) .gt. 0._f .and. pc(iz,ibin,ip) .gt. SMALL_PC )then
           if( evdrop(iz) .gt. 0._f )then
  
             ! No cores: transfer droplets within group
             if( ic1 .eq. 0 )then
-              call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
+              call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
             else
           
               ! First core is not involatile (therefore none are)
@@ -83,7 +90,7 @@ subroutine evapp(carma, cstate, iz, rc)
               ! transfer droplets within group
               !
               if( itype(ic1) .ne. I_COREMASS )then
-                call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
+                call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
               else
 
                 ! Have cores: calculate <evcore> the amount of the source term 
@@ -145,7 +152,7 @@ subroutine evapp(carma, cstate, iz, rc)
                   if( evap_total )then
                     call evap_mono(carma,cstate,iz,ibin,ig,iavg,ieto,igto,rc)
                   else
-                    call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
+                    call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
                   endif
   
                 ! Have core second moments: evaporate to mono- or polydisperse CN cores
@@ -176,7 +183,7 @@ subroutine evapp(carma, cstate, iz, rc)
   
                   ! Droplet evaporation within group
                   else
-                    call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc)
+                    call evap_ingrp(carma,cstate,iz,ibin,ig,ip,rc,dtime_in)
                   endif
                 endif      ! if_sec_mom(ig)
               endif        ! itype(ic1)

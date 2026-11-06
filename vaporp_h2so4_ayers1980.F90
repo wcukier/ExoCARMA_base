@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -42,6 +44,7 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   real(kind=f)            :: factor_kulm                     ! Kulmala correction terms
   real(kind=f)            :: en, temp
   real(kind=f)            :: sulfeq
+  real(kind=f)            :: pvap_h2o_liq, pvap_h2o_ice
   real(kind=f), parameter :: t0_kulm     = 340._f            !  T0 set in the low end of the Ayers measurement range (338-445K)
   real(kind=f), parameter :: t_crit_kulm = 905._f            !  Critical temperature = 1.5 * Boiling point
   real(kind=f), parameter :: fk0         = -10156._f / t0_kulm + 16.259_f   !  Log(Kulmala correction factor)
@@ -56,12 +59,13 @@ subroutine vaporp_H2SO4_Ayers1980(carma, cstate, iz, rc, pvap_liq, pvap_ice)
   
   ! Convert water vapor concentration to g/cm3:
   gc_cgs = gc(iz, igash2o) / (xmet(iz) * ymet(iz) * zmet(iz))
-  
-!  write(*,*) gc_cgs,pvapl(iz, igash2o)
+
+  ! Vapor pressures are stored per group; water need not be a group here.
+  call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
 
   ! Compute the sulfate composition based on Hanson parameterization
   ! to temperature and water vapor concentration.
-  wtpct(iz) = wtpct_tabaz(carma, temp, gc_cgs, pvapl(iz, igash2o), rc)
+  wtpct(iz) = wtpct_tabaz(carma, temp, gc_cgs, pvap_h2o_liq, rc)
 
   ! Parameterized fit to Giauque's (1959) enthalpies v. wt %:
   en = 4.184_f * (23624.8_f - 1.14208e8_f / ((wtpct(iz) - 105.318_f)**2 + 4798.69_f))
