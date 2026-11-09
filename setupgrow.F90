@@ -44,7 +44,6 @@ subroutine setupgrow(carma, cstate, rc)
   integer                        :: ielem    !! element index
   integer                        :: k        !! z index
   integer                        :: i, igas, igroup
-  logical                        :: have_diffus(NGAS)
   real(kind=f)                   :: rhoa_cgs, aden, wtpctf, wtmol_dif, coldia
   ! Define formats
   1 format(a,':  ',12i6)
@@ -69,10 +68,22 @@ subroutine setupgrow(carma, cstate, rc)
     rhoa_cgs = rhoa(k) / (xmet(k) * ymet(k) * zmet(k))
 
     ! Diffusivity of each gas in air from Pruppacher & Klett (eq. 13-3);
-    ! units are [cm^2/s]. The collision diameter comes from the first group
-    ! keyed to the gas. The stoichiometric factor is applied in setupgkern.
-    have_diffus(:) = .false.
-    diffus(k,:) = 0._f
+    ! units are [cm^2/s]. The stoichiometric factor is applied in setupgkern.
+    do igas = 1, NGAS
+      if (igas .eq. igash2o) then
+        ! diffus(k, igash2o) = 0.211_f * (1.01325e+6_f / p(k)) * (t(k) / 273.15_f )**1.94_f
+        diffus(k, igash2o) = 5._f / (16._f * AVG * COLDIA_H2O**2_f * rhoa_cgs * COLINT) * &
+        sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2O + wtmol_air(k)) / (2._f * PI * WTMOL_H2O))
+      else if (igas .eq. igash2so4) then
+        diffus(k,igash2so4) = 5._f / (16._f * AVG * COLDIA_H2SO4**2_f * rhoa_cgs * COLINT) * &
+        sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2SO4 + wtmol_air(k)) / (2._f * PI * WTMOL_H2SO4))
+      else ! WC
+        coldia    = carma%f_gas(igas)%f_coldia
+        wtmol_dif = carma%f_gas(igas)%f_wtmol_dif
+        diffus(k,igas) = 5._f / (16._f * AVG * coldia**2_f * rhoa_cgs * COLINT) * &
+          sqrt(RGAS * t(k) * wtmol_air(k) * (wtmol_dif + wtmol_air(k)) / (2._f * PI * wtmol_dif))
+      end if
+    end do
 
     ! Latent heats are per condensate (group); units are [cm^2/s^2].
     do igroup = 1, NGROUP
@@ -84,12 +95,6 @@ subroutine setupgrow(carma, cstate, rc)
       end if
 
       if (igas .eq. igash2o) then
-        if (.not. have_diffus(igas)) then
-          ! diffus(k, igash2o) = 0.211_f * (1.01325e+6_f / p(k)) * (t(k) / 273.15_f )**1.94_f
-          diffus(k, igash2o) = 5._f / (16._f * AVG * COLDIA_H2O**2_f * rhoa_cgs * COLINT) * &
-          sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2O + wtmol_air(k)) / (2._f * PI * WTMOL_H2O))
-          have_diffus(igas) = .true.
-        end if
 
         ! Latent heat of evaporation for water
         if (do_cnst_rlh) then
@@ -114,12 +119,7 @@ subroutine setupgrow(carma, cstate, rc)
 
         ! Properties for H2SO4
       else if (igas .eq. igash2so4) then
-        if (.not. have_diffus(igas)) then
-          aden     = rhoa_cgs * AVG / wtmol_air(k)
-          diffus(k,igash2so4) = 5._f / (16._f * AVG * COLDIA_H2SO4**2_f * rhoa_cgs * COLINT) * &
-          sqrt(RGAS * t(k) * wtmol_air(k) * (WTMOL_H2SO4 + wtmol_air(k)) / (2._f * PI * WTMOL_H2SO4))
-          have_diffus(igas) = .true.
-        end if
+        aden     = rhoa_cgs * AVG / wtmol_air(k)
 
         wtpctf = wtpct(k)/100._f
         ! From Jang et al. 2006, Transactions of the Korean Nuclear Society Autumn Meeting
@@ -128,14 +128,7 @@ subroutine setupgrow(carma, cstate, rc)
         rlhm(k,igroup) = rlhe(k,igroup)
 
       else ! WC
-        coldia = carma%f_group(igroup)%f_coldia
         wtmol_dif = carma%f_gas(igas)%f_wtmol_dif
-
-        if (.not. have_diffus(igas)) then
-          diffus(k,igas) = 5._f / (16._f * AVG * coldia**2_f * rhoa_cgs * COLINT) * &
-            sqrt(RGAS * t(k) * wtmol_air(k) * (wtmol_dif + wtmol_air(k)) / (2._f * PI * wtmol_dif))
-          have_diffus(igas) = .true.
-        end if
 
         if (carma%f_group(igroup)%f_lat_heat_e .gt. 0) then
           rlhe(k,igroup) = carma%f_group(igroup)%f_lat_heat_e

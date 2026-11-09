@@ -83,6 +83,7 @@ module carma_types_mod
     !   shortname     Short name of the gas
     !   wtmol_dif     Molecular weight of the diffusing gas [g/mol]
     !   icomposition  Gas compound specification [I_GCOMP_...]
+    !   coldia        Collision diameter of the gas molecule, for its diffusivity in air [cm]
     !   dgc_threshold convergence criteria for gas concentration [fraction]
     !   ds_threshold  convergence criteria for gas saturation [fraction]
     !
@@ -92,6 +93,7 @@ module carma_types_mod
     character(len=CARMA_SHORT_NAME_LEN)         :: f_shortname
     real(kind=f)                                :: f_wtmol_dif
     integer                                     :: f_icomposition
+    real(kind=f)                                :: f_coldia
     real(kind=f)                                :: f_dgc_threshold
     real(kind=f)                                :: f_ds_threshold
   end type carmagas_type
@@ -172,7 +174,6 @@ module carma_types_mod
     !   surften_0   Surface tension at 0 K, linearly extrapolated [dyne/cm]
     !   surften_slope Slope of surface tension with temperature,
     !               surften = surften_0 - surften_slope*T [dyne/cm/K]
-    !   coldia      Collision diameter [cm]
     !   lat_heat_e  Latent heat of evaporation [cm^2/s^2]
     !   desorption  Desorption energy [eV]; -1 = 0.5*lat_heat_e per molecule
     !   is_type3    1 for a type III reaction (Helling & Woitke 2006), else 0
@@ -235,7 +236,6 @@ module carma_types_mod
     real(kind=f)                                :: f_rho_cond      ! WC
     real(kind=f)                                :: f_surften_0     ! WC
     real(kind=f)                                :: f_surften_slope ! WC
-    real(kind=f)                                :: f_coldia        ! WC
     real(kind=f)                                :: f_lat_heat_e    ! WC
     real(kind=f)                                :: f_desorption    ! WC
     integer                                     :: f_is_type3      ! WC

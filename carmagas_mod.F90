@@ -35,13 +35,14 @@ contains
   !!
   !! @see CARMA_AddGas
   !! @see CARMAGAS_Destroy
-  subroutine CARMAGAS_Create(carma, igas, name, wtmol_dif, icomposition, rc, &
+  subroutine CARMAGAS_Create(carma, igas, name, wtmol_dif, icomposition, coldia, rc, &
     shortname, dgc_threshold, ds_threshold)
     type(carma_type), intent(inout)       :: carma           !! the carma object
     integer, intent(in)                   :: igas            !! the gas index
     character(*), intent(in)              :: name            !! the gas name, maximum of 255 characters
     real(kind=f), intent(in)              :: wtmol_dif       !! molecular weight of the diffusing gas [g/mol]
     integer, intent(in)                   :: icomposition    !! gas compound specification
+    real(kind=f), intent(in)              :: coldia          !! collision diameter of the gas molecule [cm]
     integer, intent(out)                  :: rc              !! return code, negative indicates failure
     character(*), optional, intent(in)    :: shortname       !! the gas shortname, maximum of 6 characters
     real(kind=f), optional, intent(in)    :: dgc_threshold   !! convergence criteria for gas concentration [0 : off; > 0 : percentage change]
@@ -58,10 +59,18 @@ contains
       return
     end if
 
+    if (coldia <= 0._f) then
+      if (carma%f_do_print) write(carma%f_LUNOPRT, *) "CARMAGAS_Create:: ERROR - The collision diameter (", &
+        coldia, ") of gas ", trim(name), " must be positive."
+      rc = RC_ERROR
+      return
+    end if
+
     ! Save off the settings.
     carma%f_gas(igas)%f_name         = name
     carma%f_gas(igas)%f_wtmol_dif    = wtmol_dif
     carma%f_gas(igas)%f_icomposition = icomposition
+    carma%f_gas(igas)%f_coldia       = coldia
 
     ! Defaults for optional parameters
     carma%f_gas(igas)%f_shortname       = ""

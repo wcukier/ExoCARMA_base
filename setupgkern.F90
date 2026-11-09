@@ -557,23 +557,12 @@ contains
     integer      :: jgas, kk, ii
     real(kind=f) :: dj(NZ), fpj(NZ), fptj(NZ)
     real(kind=f) :: rlhj, brj, rkn, rknt, rl, rlt, d1, t1, rsh, sc, pr, y1, y2, fvj, ftj
-    real(kind=f), parameter :: COLINT = 1._f   ! collision integral, as in setupgrow
 
     do jgas = 1, NGAS
       if (carma%f_dgas_dcond(igroup, jgas) == 0._f) cycle
       if (jgas == igas) cycle
 
-      if (diffus(1,jgas) > 0._f) then
-        dj(:) = diffus(:,jgas)
-      else
-        ! setupgrow sets diffus only for key gases; estimate this one from
-        ! the condensate's collision diameter.
-        do kk = 1, NZ
-          dj(kk) = 5._f / (16._f * AVG * carma%f_group(igroup)%f_coldia**2 * rhoa_cgs(kk,jgas) * COLINT) * &
-            sqrt(RGAS * t(kk) * wtmol_air(kk) * (gwtmol_dif(jgas) + wtmol_air(kk)) / (2._f * PI * gwtmol_dif(jgas)))
-        end do
-      end if
-      dj(:) = dj(:) / real(carma%f_nu_dep(igroup, jgas), f)
+      dj(:) = diffus(:,jgas) / real(carma%f_nu_dep(igroup, jgas), f)
 
       fpj(:)  = 3._f*dj(:) * sqrt( ( PI*gwtmol_dif(jgas) ) / ( 8._f*RGAS*t(:) ) )
       fptj(:) = fpj(:)*thcond(:) / ( dj(:) * rhoa_cgs(:, jgas) * ( CP - RGAS/( 2._f*wtmol_air(:) ) ) )

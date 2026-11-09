@@ -39,7 +39,7 @@ module carmagroup_mod
 contains
 
   subroutine CARMAGROUP_Create(carma, igroup, name, rmin, rmrat, wtmol, ishape, eshape, is_ice, &
-      rho_cond, surften_0, coldia, vp_offset, vp_tcoeff, ivaprtn, rc, &
+      rho_cond, surften_0, vp_offset, vp_tcoeff, ivaprtn, rc, &
       wtmol_core, is_type3, surften_slope, vp_metcoeff, vp_logpcoeff, lat_heat_e, stofact, desorption, &
       irhswell, irhswcomp, refidx, do_mie, do_wetdep, do_drydep, do_vtran, solfac, scavcoef, shortname, &
       cnsttype, maxbin, ifallrtn, is_cloud, rmassmin, rm, fdim, imiertn, is_sulfate, dpc_threshold, &
@@ -55,7 +55,6 @@ contains
     logical, intent(in)                         :: is_ice              !! is this an ice particle?
     real(kind=f), intent(in)                    :: rho_cond            !! density of condensate [g/cm^3] WC
     real(kind=f), intent(in)                    :: surften_0           !! surface tension at 0 K (assuming linear extrapolation) [dyne/cm] WC
-    real(kind=f), intent(in)                    :: coldia              !! collision diameter [cm] WC
     real(kind=f), intent(in)                    :: vp_offset           !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure)) WC
     real(kind=f), intent(in)                    :: vp_tcoeff           !! vapor pressure = 10**(vp_offset - vp_tcoeff/Temperature - vp_metcoeff*metallicity - vp_logpcoeff * log10(Pressure)) WC
     integer, intent(in)                         :: ivaprtn             !! vapor pressure routine for this condensate
@@ -186,7 +185,6 @@ contains
     carma%f_group(igroup)%f_wtmol       = wtmol
     carma%f_group(igroup)%f_rho_cond    = rho_cond
     carma%f_group(igroup)%f_surften_0   = surften_0
-    carma%f_group(igroup)%f_coldia      = coldia
     carma%f_group(igroup)%f_vp_offset   = vp_offset
     carma%f_group(igroup)%f_vp_tcoeff   = vp_tcoeff
     carma%f_group(igroup)%f_ivaprtn     = ivaprtn
