@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -35,6 +37,8 @@ subroutine newstate(carma, cstate, rc)
   logical                         :: iz_ok              ! true while no error in current iz
   real(kind=f)                    :: nretries_local     ! thread-local retry counter
   real(kind=f)                    :: dtime_lcl          ! thread-local substep dtime
+  real(kind=f)                    :: dt_suggest         ! rate-informed substep suggestion from the failure site [s]
+  real(kind=f)                    :: nt_est             ! substep count implied by dt_suggest (real to avoid overflow)
 !  real(kind=f)                    :: gasprod_tot(NGAS)		!PETER
 !  real(kind=f)                    :: rnucpeup_tot(NBIN,NELEM)	!PETER
 !  real(kind=f)                    :: rhompe_tot(NBIN,NELEM)	!PETER
@@ -163,7 +167,7 @@ subroutine newstate(carma, cstate, rc)
     !$OMP PARALLEL DO &
     !$OMP& PRIVATE(iz, ntsubsteps, takeSteps, fraction, maxrate, warned, &
     !$OMP&         isubstep, igas, ibin, ielem, igroup, sedlayer, pcd_last, &
-    !$OMP&         rc_lcl, iz_ok, nretries_local, dtime_lcl) &
+    !$OMP&         rc_lcl, iz_ok, nretries_local, dtime_lcl, dt_suggest, nt_est) &
     !$OMP& SCHEDULE(runtime)
     do iz = kb,ke,idk
       rc_lcl = RC_OK
@@ -173,8 +177,10 @@ subroutine newstate(carma, cstate, rc)
       ! (Could be same for all spatial pts, or could vary as a function of location)
       ntsubsteps = minsubsteps
 
-      !call nsubsteps(carma, cstate, iz, dtime_orig, ntsubsteps, rc_lcl)
-      !if (rc_lcl <  RC_OK) ...
+      call nsubsteps(carma, cstate, iz, dtime_orig, ntsubsteps, rc_lcl)
+      if (rc_lcl < RC_OK) then
+        iz_ok = .false.
+      end if
 
 	    !write(*,*) iz, ntsubsteps
 
@@ -197,6 +203,10 @@ subroutine newstate(carma, cstate, rc)
         ! Use a thread-local dtime to avoid data races on cstate%f_dtime when
         ! different iz layers retry with different ntsubsteps.
         dtime_lcl = dtime_orig / ntsubsteps
+
+        ! Rate-informed suggestion from wherever this attempt fails; huge means
+        ! no failure site offered one.
+        dt_suggest = huge(1._f)
 
         ! Don't retry unless requested.
         takeSteps = .false.
@@ -273,7 +283,7 @@ subroutine newstate(carma, cstate, rc)
 
           !write(*,*) "before microfast"
           !write(*,*) isubstep, iz
-          call microfast(carma, cstate, iz, rc_lcl, maxrate, dtime_lcl, nretries_local)
+          call microfast_implicit(carma, cstate, iz, rc_lcl, maxrate, dtime_lcl, nretries_local, dt_suggest)
           if (rc_lcl < RC_OK) then
             iz_ok = .false.
             exit
@@ -305,11 +315,17 @@ subroutine newstate(carma, cstate, rc)
                 exit
               end if
 
-              ! Try twice the substeps
+              ! At least double the substeps, more if dt_suggest calls for it,
+              ! up to maxntsubsteps_cap.
               !
               ! NOTE: We are going to rely upon retries, so don't clutter the log
               ! with retry print statements. They slow down the run.
-              ntsubsteps = ntsubsteps * 2
+              nt_est = real(ntsubsteps, kind=f) * 2._f
+              if (dt_suggest > 0._f .and. dt_suggest < dtime_orig) then
+                ! +1 for ceiling(), kept real to avoid integer overflow
+                nt_est = max(nt_est, dtime_orig / dt_suggest + 1._f)
+              end if
+              ntsubsteps = int(min(real(maxntsubsteps_cap, kind=f), nt_est))
               ! maxrate = maxrate / 2                  !PETER
 
               !if (do_print) write(LUNOPRT,*) "newstate::WARNING - Substep failed, retrying with ", ntsubsteps, " substeps."
@@ -320,9 +336,12 @@ subroutine newstate(carma, cstate, rc)
               t(iz) = told(iz)
               do igas = 1,NGAS
                 gc(iz,igas) = gcl(iz,igas)
+              end do
 
-                ! Now that we have reset the gas concentration, we need to recalculate the supersaturation.
-                call supersat(carma, cstate, iz, igas, rc_lcl)
+              ! Now that we have reset the gas concentrations, we need to
+              ! recalculate the supersaturation of each condensate.
+              do igroup = 1,NGROUP
+                call supersat(carma, cstate, iz, igroup, rc_lcl)
                 if (rc_lcl < RC_OK) then
                   iz_ok = .false.
                   exit
@@ -453,14 +472,16 @@ subroutine newstate(carma, cstate, rc)
   
     do igas = 1, NGAS
       gc(:, igas) = (1._f - scale_cldfrc(:)) * gc_orig(:, igas) + gc(:, igas) * scale_cldfrc(:)
-    
+
       if (do_substep) then
         gc(:, igas) = gc(:, igas) + (1._f - scale_cldfrc(:)) * d_gc(:, igas)
       end if
+    end do
 
-      ! Recalculate gridbox average supersaturation.
+    ! Recalculate gridbox average supersaturation of each condensate.
+    do igroup = 1, NGROUP
       do iz = 1, NZ
-        call supersat(carma, cstate, iz, igas, rc)
+        call supersat(carma, cstate, iz, igroup, rc)
         if (rc < RC_OK) return
       end do
     end do

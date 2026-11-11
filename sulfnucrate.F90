@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -28,6 +30,7 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   integer, intent(in)                  :: iz          !! level index
   integer, intent(in)                  :: igroup      !! group index
   integer, intent(out)                 :: nucbin      !! bin in which nucleation occurs
+  real(kind=f)                         :: pvap_h2o_liq, pvap_h2o_ice
   real(kind=f), intent(out)            :: nucrate     !! nucleation rate #/x/y/z/s
   integer, intent(inout)               :: rc          !! return code, negative indicates failure
 
@@ -104,22 +107,24 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   end do
 
   ! Molecular weight ratio of H2SO4 / H2O:
-  wtmolr = gwtmol(igash2so4) / gwtmol(igash2o)
+  wtmolr = gwtmol_dif(igash2so4) / gwtmol_dif(igash2o)
 
   ! Compute H2O and H2SO4 densities in g/cm3      
   h2o_cgs   = gc(iz, igash2o)   / (zmet(iz) * xmet(iz) * ymet(iz))
   h2so4_cgs = gc(iz, igash2so4) / (zmet(iz) * xmet(iz) * ymet(iz))
 
   ! Compute H2O and H2SO4 concentrations in molec/cm3      
-  h2o   = h2o_cgs   * AVG / gwtmol(igash2o)
-  h2so4 = h2so4_cgs * AVG / gwtmol(igash2so4)
+  h2o   = h2o_cgs   * AVG / gwtmol_dif(igash2o)
+  h2so4 = h2so4_cgs * AVG / gwtmol_dif(igash2so4)
 
   ! Compute relative humidity of water wrt liquid water       
-  rh = (supsatl(iz, igash2o) + 1._f) * 100._f
+  ! (from the H2O vapor pressure, since water need not be a condensate group)
+  call vaporp_h2o_murphy2005(carma, cstate, iz, rc, pvap_h2o_liq, pvap_h2o_ice)
+  rh = (h2o_cgs * (RGAS / gwtmol_dif(igash2o)) * t(iz) / pvap_h2o_liq) * 100._f
 
   ! Compute ln of H2O and H2SO4 ambient vapor pressures [dynes/cm2]
-  h2oln   = log(h2o_cgs   * (RGAS / gwtmol(igash2o))   * t(iz))
-  h2so4ln = log(h2so4_cgs * (RGAS / gwtmol(igash2so4)) * t(iz))
+  h2oln   = log(h2o_cgs   * (RGAS / gwtmol_dif(igash2o))   * t(iz))
+  h2so4ln = log(h2so4_cgs * (RGAS / gwtmol_dif(igash2so4)) * t(iz))
 
   ! loop through wt pcts and calculate vp/composition for each
   do i = 1, 46
@@ -236,8 +241,8 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   sigma = sulfate_surf_tens(carma, wstar, t(iz), rc)  
       
   ! Critical Y (eqn 13 in Zhao & Turco 1993) [erg/cm3]
-  ystar = dstar * RGAS * t(iz) * (wfstar / gwtmol(igash2so4) &
-      * raln + (1._f - wfstar) / gwtmol(igash2o) * rhln)
+  ystar = dstar * RGAS * t(iz) * (wfstar / gwtmol_dif(igash2so4) &
+      * raln + (1._f - wfstar) / gwtmol_dif(igash2o) * rhln)
   if (ystar < 1.e-20_f) then
     nucbin  = 0 
     nucrate = 0.0_f
@@ -258,8 +263,8 @@ subroutine sulfnucrate(carma,cstate, iz, igroup, nucbin, nucrate, rc)
   rb = RGAS * t(iz) / 2._f / PI
       
   ! Beta[cm/s] = sqrt(RB[erg/mol] / WTMOL[g/mol])
-  beta1 = sqrt(rb / gwtmol(igash2so4)) ! H2SO4
-  beta2 = sqrt(rb / gwtmol(igash2o))   ! H2O
+  beta1 = sqrt(rb / gwtmol_dif(igash2so4)) ! H2SO4
+  beta2 = sqrt(rb / gwtmol_dif(igash2o))   ! H2O
 
   ! RPR[molecules/s] = 4Pi * R2[cm2] * H2O[molecules/cm3] * Beta[cm/s]
   rpr = 4._f * PI * r2 * h2o * beta1

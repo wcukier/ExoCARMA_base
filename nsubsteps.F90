@@ -1,3 +1,5 @@
+! LLM-GENERATED — UNVERIFIED (tier: physics)
+! Remove this banner only after completing the checks in Assistant/POLICY.md §2.
 ! Include shortname defintions, so that the F77 code does not have to be modified to
 ! reference the CARMA structure.
 #include "carma_globaer.h"
@@ -31,15 +33,20 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
   ! Local declarations
   integer                        :: ig      ! group index
   integer                        :: igas    ! gas index
+  integer                        :: jg      ! group of the nucleation target element
   integer                        :: ibin    ! bin index
   integer                        :: iepart
   integer                        :: inuc
   integer                        :: ienucto
   integer                        :: ibin_small(NGROUP)
+  integer                        :: jgas    ! depleted gas
   real(kind=f)                   :: g0
   real(kind=f)                   :: g1
   real(kind=f)                   :: dmdt
   real(kind=f)                   :: dt_adv
+  real(kind=f)                   :: dt_exh  ! substep limit from gas exhaustion [s]
+  real(kind=f)                   :: demand  ! gas consumption rate of a group [g/cm3/s]
+  real(kind=f), parameter        :: DT_SAFETY = 0.5_f  ! margin on the exhaustion estimate
   real(kind=f)                   :: ss
   real(kind=f)                   :: ssold
   real(kind=f)                   :: pvap
@@ -71,28 +78,25 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
           if( (itype(iepart) .eq. I_INVOLATILE) .or. &
 	    (itype(iepart) .eq. I_VOLATILE) ) then
   
-            ! condensing gas
-            igas = inucgas(ig,1)
-  
-            if (igas /= 0) then
-          
-              ss = max( supsatl(iz,igas), supsatlold(iz,igas) )
-  
-              do inuc = 1,nnuc2elem(iepart)
-                ienucto = inuc2elem(inuc,iepart)
-    
-                if( (inucproc(iepart,ienucto) .eq. I_DROPACT) .or. &
-		  (inucproc(iepart,ienucto) .eq. I_HETGEN) ) then
-                  do ibin = 1, NBIN
-                    if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) &
-			.gt. conmax * pconmax(iz,ig) .and. &
-                        ss .gt. scrit(iz,ibin,ig,igas) )then
-                      ntsubsteps = maxsubsteps
-                    endif
-                  enddo
-                endif
-              enddo
-            endif
+            do inuc = 1,nnuc2elem(iepart)
+              ienucto = inuc2elem(inuc,iepart)
+
+              if( (inucproc(iepart,ienucto) .eq. I_DROPACT) .or. &
+	  (inucproc(iepart,ienucto) .eq. I_HETGEN) ) then
+
+                ! Supersaturation of the target element's group
+                jg = igelem(ienucto)
+                ss = max( supsatl(iz,jg), supsatlold(iz,jg) )
+
+                do ibin = 1, NBIN
+                  if( pc(iz,ibin,iepart) / xmet(iz) / ymet(iz) / zmet(iz) &
+		.gt. conmax * pconmax(iz,ig) .and. &
+                      ss .gt. scrit(iz,ibin,jg) )then
+                    ntsubsteps = maxsubsteps
+                  endif
+                enddo
+              endif
+            enddo
   
           elseif( itype(iepart) .eq. I_VOLATILE ) then
           
@@ -114,6 +118,7 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
     if( ntsubsteps .lt. maxsubsteps )then
   
       dt_adv = dtime_save
+      dt_exh = dtime_save
       do ig = 1, NGROUP
       
         ! element of particle number concentration
@@ -129,27 +134,46 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
             if( itype(iepart) .eq. I_VOLATILE ) then
     
               if( is_grp_ice(ig) )then
-                ss = supsati(iz,igas)
-                pvap = pvapi(iz,igas)
+                ss = supsati(iz,ig)
+                pvap = pvapi(iz,ig)
               else
-                ss = supsatl(iz,igas)
-                pvap = pvapl(iz,igas)
+                ss = supsatl(iz,ig)
+                pvap = pvapl(iz,ig)
               endif
     
-              g0 = gro(iz,ibin_small(ig),ig,igas)
-              g1 = gro1(iz,ibin_small(ig),ig,igas)
+              g0 = gro(iz,ibin_small(ig),ig)
+              g1 = gro1(iz,ibin_small(ig),ig)
               dmdt = abs( pvap * ss * g0 / ( 1._f + g0*g1*pvap ) )
               
               if (dmdt /= 0._f) then
                 dt_adv = min( dt_adv, dm(ibin_small(ig),ig)/dmdt )
+
+                ! Gas exhaustion: limit condensation in one substep to a
+                ! fraction DT_SAFETY of each gas the group depletes.
+                if (ss > 0._f) then
+                do jgas = 1, NGAS
+                  if (carma%f_dgas_dcond(ig, jgas) == 0._f) cycle
+                  demand = dmdt * pconmax(iz,ig) * carma%f_dgas_dcond(ig, jgas)
+                  if (demand > 0._f .and. gc(iz,jgas) > 0._f) then
+                    dt_exh = min( dt_exh, DT_SAFETY * gc(iz,jgas) / demand )
+                  end if
+                end do
+                end if
               end if
             endif
           endif
         endif
       enddo
-  
+
       ntsubsteps = nint(min(real(maxsubsteps, kind=f), real(dtime_save, kind=f) / dt_adv))
       ntsubsteps = max( minsubsteps, ntsubsteps )
+
+      ! Apply the exhaustion limit, bounded by maxsubsteps; layers that need
+      ! more are handled by the retry in newstate.
+      if (dt_exh < dtime_save) then
+        ntsubsteps = max( ntsubsteps, &
+             int(min(real(maxsubsteps, kind=f), dtime_save / dt_exh + 1._f)) )
+      end if
     endif
 
     ! If the ice supersaturation is large enough for homogeneous freezing
@@ -160,21 +184,15 @@ subroutine nsubsteps(carma, cstate, iz, dtime_save, ntsubsteps, rc)
         ! element of particle number concentration  
         iepart = ienconc(ig)
 
-        ! condensing gas
-        igas = inucgas(ig,1)
+        do inuc = 1,nnuc2elem(iepart)
+          ienucto = inuc2elem(inuc,iepart)
 
-        if (igas /= 0) then
-          
-          do inuc = 1,nnuc2elem(iepart)
-            ienucto = inuc2elem(inuc,iepart)
-    
-            if (iand(inucproc(iepart,ienucto), I_AERFREEZE) .ne. 0) then
-              if( (supsati(iz,igas) .gt. 0.4_f) .and. (t(iz) .lt. 233.16_f) ) then
-                ntsubsteps = maxsubsteps
-              endif
+          if (iand(inucproc(iepart,ienucto), I_AERFREEZE) .ne. 0) then
+            if( (supsati(iz,igelem(ienucto)) .gt. 0.4_f) .and. (t(iz) .lt. 233.16_f) ) then
+              ntsubsteps = maxsubsteps
             endif
-          enddo
-        endif
+          endif
+        enddo
       enddo
     endif
   endif
