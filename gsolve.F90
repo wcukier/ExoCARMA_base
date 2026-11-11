@@ -92,12 +92,10 @@ subroutine gsolve(carma, cstate, iz, previous_ice, previous_liquid, previous_rlh
 
     ! Don't let the gas concentration go negative.
     if (gc(iz,igas) < 0.0_f) then
-#ifdef CARMA_TEST_CHECKS
-      ! Test-build diagnostic of the failing gas
-      write(91,'(a,2i4,f6.0,4es15.6e3,i2,*(es13.4e3))') 'F', iz, igas, nretries_in, dtime_in, gc_old, &
+      ! Diagnostic of the failing gas
+      if (do_printdiag) write(lundiag,'(a,2i4,f6.0,4es15.6e3,i2,*(es13.4e3))') 'F', iz, igas, nretries_in, dtime_in, gc_old, &
         gasprod(igas,iz), phochemprod_gas(iz,igas), merge(1, 0, nretries_in == maxretries .and. gas_check == 2), &
         (supsatl(iz,ig), ig = 1, NGROUP)
-#endif
       if (do_substep) then
         if (nretries_in == maxretries .and. gas_check == 2) then 
           !if (do_print) write(LUNOPRT,1) trim(gasname(igas)), iz, &

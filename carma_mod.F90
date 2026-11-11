@@ -156,6 +156,9 @@ contains
       carma%f_do_print = .TRUE.
     end if
 
+    ! Diagnostic output goes to lundiag only if one was provided.
+    carma%f_lundiag      = 0
+    carma%f_do_printdiag = .FALSE.
     if (present(lundiag)) then      ! PETER
       carma%f_lundiag = lundiag     ! PETER
       carma%f_do_printdiag = .TRUE.  ! PETER

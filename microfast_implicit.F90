@@ -282,12 +282,10 @@ subroutine microfast_implicit(carma, cstate, iz, rc, maxrate, dtime_in, nretries
   if (.not. added) exit
   end do
 
-#ifdef CARMA_TEST_CHECKS
   ! Diagnostic: layer, number of solved gases, Newton iterations, passes,
   ! converged flag, best residual, method and the solved gases.
-  write(91,'(a,i4,2i3,i5,i2,es13.4e3,i2,*(i3))') 'I', iz, nact, iter, npass, merge(1, 0, converged), phibest, &
-    method, (iact(i), i = 1, nact)
-#endif
+  if (do_printdiag) write(lundiag,'(a,i4,2i3,i5,i2,es13.4e3,i2,*(i3))') 'I', iz, nact, iter, npass, &
+    merge(1, 0, converged), phibest, method, (iact(i), i = 1, nact)
 
   ! Not converged: ask for a shorter substep while retries remain; on the last
   ! one, accept the best iterate (still mass conserving).
@@ -389,9 +387,7 @@ contains
           if (abs(uhi - ulo) <= implicit_rtol) then
             ! Closed on a jump: take the lower end, whose residual is positive,
             ! so the end-of-step gas exceeds the trial gas and stays positive.
-#ifdef CARMA_TEST_CHECKS
-            write(91,'(a,i4,i3,4es13.4e3)') 'J', iz, iact(jj), exp(ulo), exp(uhi), flo0, fhi0
-#endif
+            if (do_printdiag) write(lundiag,'(a,i4,i3,4es13.4e3)') 'J', iz, iact(jj), exp(ulo), exp(uhi), flo0, fhi0
             uc = ulo
             gas_ok     = .true.
             jumped(jj) = .true.
@@ -513,9 +509,7 @@ contains
         end if
       end do
       if ((ibest /= icur) .and. (sbest < (1._f - KEY_HYST) * scur)) then
-#ifdef CARMA_TEST_CHECKS
-        write(91,'(a,4i4)') 'K', iz, ig, icur, ibest
-#endif
+        if (do_printdiag) write(lundiag,'(a,4i4)') 'K', iz, ig, icur, ibest
         ikey(iz,ig) = ibest
         changed = .true.
       end if
