@@ -249,18 +249,6 @@ module carma_rce
     real(kind=f) :: dt_since_solve    = 0._f !! model time since last solve [s]
     real(kind=f) :: drift             = 0._f !! accumulated max|dT| since last solve [K]
     real(kind=f) :: xsec_ref         = -1._f !! cloud cross-section at last solve
-    !! Cumulative energy budget of the update [J/m^2]: heating computed by the
-    !! solves (sum of C*dtdt*dt), heating applied to t, and enthalpy change of
-    !! the convective adjustment.
-    !! LLM-GENERATED — UNVERIFIED (tier: physics)
-    real(kind=f) :: e_comp = 0._f
-    real(kind=f) :: e_appl = 0._f
-    real(kind=f) :: e_adj  = 0._f
-    !! Computed and applied, per layer [J/m^2].
-    real(kind=f), allocatable :: e_comp_z(:), e_appl_z(:)
-    !! Computed and applied, split into radiative and convective layers [J/m^2].
-    real(kind=f) :: e_appl_rad = 0._f, e_comp_rad = 0._f
-    real(kind=f) :: e_appl_cnv = 0._f, e_comp_cnv = 0._f
 
     ! ---- work arrays, allocated once --------------------------------------
     real(kind=f), allocatable :: beta(:,:)      !! (nwave, nz) gas attenuation [1/m]
@@ -1561,7 +1549,6 @@ contains
     real(kind=f) :: xsec, dt_eff, dt0, dt_lay
     real(kind=f) :: dt_col(rce%nz), rhs(rce%nz), sol(rce%nz)
     real(kind=f) :: kzz_new(rce%nz+1), rescale_new
-    real(kind=f) :: hcap(rce%nz), e_pre
     integer      :: rad_idx(rce%nz), nrad, i, j
     logical      :: dense_ok, do_jac
     logical      :: do_solve
@@ -1707,7 +1694,6 @@ contains
     ! would move that equilibrium rather than only the approach to it.
     do iz = 1, nz
       damp(iz) = 1._f / (1._f + dt_eff / rce%tau_rad(iz))
-      hcap(iz) = (pl(iz) - pl(iz+1)) / rce%grav * rce%cp
     end do
 
     iz = 1
@@ -1750,38 +1736,13 @@ contains
       rce%lambda = max(2._f * rce%lambda, LAMBDA_MIN)
     end if
 
-    ! ---- energy budget diagnostics ----------------------------------------
-    rce%e_comp = rce%e_comp + dt_eff * sum(hcap(:) * rce%dtdt(:))
-    rce%e_appl = rce%e_appl + sum(hcap(:) * dt_col(:))
-
-    if (.not. allocated(rce%e_comp_z)) then
-      allocate(rce%e_comp_z(nz), rce%e_appl_z(nz))
-      rce%e_comp_z(:) = 0._f
-      rce%e_appl_z(:) = 0._f
-    end if
-
-    rce%e_comp_z(:) = rce%e_comp_z(:) + dt_eff * hcap(:) * rce%dtdt(:)
-    rce%e_appl_z(:) = rce%e_appl_z(:) + hcap(:) * dt_col(:)
-
-    do iz = 1, nz
-      if (rce%is_conv(iz)) then
-        rce%e_comp_cnv = rce%e_comp_cnv + dt_eff * hcap(iz) * rce%dtdt(iz)
-        rce%e_appl_cnv = rce%e_appl_cnv + hcap(iz) * dt_col(iz)
-      else
-        rce%e_comp_rad = rce%e_comp_rad + dt_eff * hcap(iz) * rce%dtdt(iz)
-        rce%e_appl_rad = rce%e_appl_rad + hcap(iz) * dt_col(iz)
-      end if
-    end do
-
     do iz = 1, nz
       t(iz) = t(iz) + dt_col(iz)
     end do
 
     ! ---- mix away whatever the heating left superadiabatic ----------------
-    e_pre = sum(hcap(:) * t(:))
     call rce_conv_adj(rce, p, pl, t, rce%is_conv, rce%nz_rcb, rce%nzone, &
                       rce%conv_resid)
-    rce%e_adj = rce%e_adj + (sum(hcap(:) * t(:)) - e_pre)
 
     ! ---- move the altitude grid to match the new temperature --------------
     call rce_level_temps(nz, p, pl, t, rce%tl)
